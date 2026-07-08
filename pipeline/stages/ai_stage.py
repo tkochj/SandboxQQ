@@ -67,6 +67,12 @@ class AIResponseStage(Stage):
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    else:
+                        text = await resp.text()
+                        if "does not support image" in text or "image input" in text.lower():
+                            logger.warning(f"Vision model {model} does not support image input")
+                        else:
+                            logger.warning(f"Vision API error {resp.status}: {text[:200]}")
         except Exception as e:
             logger.warning(f"Vision analysis failed: {e}")
         return ""
@@ -109,22 +115,22 @@ class AIResponseStage(Stage):
         user_content = event.content
         vision_analysis = ""
 
+        qq_img_urls = []
         if event.attachments:
             parts = [user_content] if user_content.strip() else []
             for a in event.attachments:
                 atype = a.get("type", "")
                 url = a.get("url", "")
                 if atype == "image" and url:
+                    qq_img_urls.append(url)
                     local_path = await self._download_img(url, sandbox_root)
                     if local_path:
                         analysis = await self._analyze_image(local_path, config)
                         if analysis:
                             vision_analysis = analysis
-                            parts.append(f"[图片自动分析: {analysis[:300]}]")
-                        else:
-                            parts.append(f"[图片: {url}]")
-                    else:
-                        parts.append(f"[图片: {url}]")
+                            parts.append(f"[图片分析: {analysis[:300]}]")
+                            continue
+                    parts.append(f"[用户发送了一张图片]")
                 else:
                     parts.append(f"[{atype}: {url if url else a.get('name','')}]")
             user_content = "\n".join(parts)
@@ -207,8 +213,12 @@ class AIResponseStage(Stage):
 
             event.set_reply("已达到最大工具调用轮次")
         except Exception as e:
-            logger.error(f"AI stage error: {e}")
-            event.set_reply(f"AI 处理失败: {e}")
+            err = str(e)
+            if "does not support image" in err or "image input" in err.lower():
+                event.set_reply("收到图片，但我当前的模型不支持直接识别图片。如需识图请配置 Vision API。")
+            else:
+                event.set_reply(f"AI 处理失败: {err[:200]}")
+            logger.error(f"AI stage error: {err[:200]}")
         yield
 
     async def _web_search(self, query: str) -> str:

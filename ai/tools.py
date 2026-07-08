@@ -184,8 +184,14 @@ class AnalyzeImageTool(SandboxTool):
                         headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"})
                     resp.raise_for_status()
                     return resp.json()["choices"][0]["message"]["content"]
+            if self.config and hasattr(self.config, 'vision_api_key') and self.config.vision_api_key:
+                return f"图片已读取({os.path.getsize(ap)}bytes)，但识图API返回错误，请检查vision配置"
             return f"图片已读取({os.path.getsize(ap)}bytes)，未配置识图模型"
-        except Exception as e: return f"分析失败: {e}"
+        except Exception as e:
+            err = str(e)
+            if "does not support image" in err or "image input" in err.lower():
+                return "当前模型不支持图片识别，请配置支持 Vision 的 API（如 GLM-4.6V-Flash）"
+            return f"分析失败: {err[:200]}"
 
 class GenerateVideoTool(SandboxTool):
     name = "generate_video"; display_name = "生成视频"
