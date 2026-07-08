@@ -1163,48 +1163,69 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(status_box)
 
+        # Bot profile management (graphical)
+        profile_box = QGroupBox("机器人配置管理")
+        profile_layout = QVBoxLayout(profile_box)
+        profile_top = QHBoxLayout()
+        profile_top.addWidget(QLabel("保存的配置:"))
+        profile_top.addStretch()
+        self.bot_profile_add = IconButton("＋ 添加", "➕", "outline")
+        self.bot_profile_add.clicked.connect(self._add_bot_profile)
+        profile_top.addWidget(self.bot_profile_add)
+        self.bot_profile_del = IconButton("删除", "🗑", "danger")
+        self.bot_profile_del.clicked.connect(self._del_bot_profile)
+        profile_top.addWidget(self.bot_profile_del)
+        profile_layout.addLayout(profile_top)
+
+        self.bot_profile_list = QListWidget()
+        self.bot_profile_list.setMinimumHeight(60)
+        self.bot_profile_list.setMaximumHeight(100)
+        self.bot_profile_list.setStyleSheet(f"""
+            QListWidget {{ background: {C_BG_INPUT}; border: 1px solid {C_BORDER}; border-radius: 6px; color: {C_TEXT}; }}
+            QListWidget::item {{ padding: 8px; border-bottom: 1px solid {C_BORDER}; }}
+            QListWidget::item:selected {{ background: {C_PRIMARY}; }}
+        """)
+        profile_layout.addWidget(self.bot_profile_list)
+
+        profile_btns = QHBoxLayout()
+        self.bot_profile_load = IconButton("加载选中", "📂", "outline")
+        self.bot_profile_load.clicked.connect(self._load_bot_profile)
+        profile_btns.addWidget(self.bot_profile_load)
+        self.bot_profile_save = IconButton("覆盖保存", "💾", "outline")
+        self.bot_profile_save.clicked.connect(self._save_bot_profile)
+        profile_btns.addWidget(self.bot_profile_save)
+        profile_btns.addStretch()
+        profile_layout.addLayout(profile_btns)
+        layout.addWidget(profile_box)
+
         # QQ官方协议
-        official_box = QGroupBox("QQ 官方机器人协议")
+        official_box = QGroupBox("连接参数")
         off_form = QFormLayout(official_box)
-        off_form.setSpacing(10)
+        off_form.setSpacing(8)
         off_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
+        proto_row = QHBoxLayout()
+        self.bot_proto_combo = QComboBox()
+        self.bot_proto_combo.addItems(["QQ官方机器人", "OneBot 协议"])
+        self.bot_proto_combo.setStyleSheet(f"QComboBox {{ background: {C_BG_INPUT}; color: {C_TEXT}; border: 1px solid {C_BORDER}; border-radius: 6px; padding: 6px 10px; min-width: 140px; }} QComboBox QAbstractItemView {{ background: {C_BG_INPUT}; color: {C_TEXT}; selection-background: {C_PRIMARY}; }}")
+        proto_row.addWidget(self.bot_proto_combo)
+        self.bot_use_sandbox = QCheckBox("沙箱环境")
+        self.bot_use_sandbox.setStyleSheet(f"color: {C_TEXT};")
+        proto_row.addWidget(self.bot_use_sandbox)
+        proto_row.addStretch()
+        off_form.addRow("协议:", proto_row)
+
         self.bot_appid = QLineEdit()
-        self.bot_appid.setPlaceholderText("Bot AppID (从QQ开放平台获取)")
+        self.bot_appid.setPlaceholderText("Bot AppID")
         off_form.addRow("AppID:", self.bot_appid)
 
         self.bot_appsecret = QLineEdit()
-        self.bot_appsecret.setPlaceholderText("AppSecret (从QQ开放平台获取)")
+        self.bot_appsecret.setPlaceholderText("AppSecret")
         self.bot_appsecret.setEchoMode(QLineEdit.EchoMode.Password)
         off_form.addRow("AppSecret:", self.bot_appsecret)
 
-        # Bot profile management
-        profile_box = QGroupBox("机器人配置管理")
-        profile_layout = QVBoxLayout(profile_box)
-        profile_row = QHBoxLayout()
-        self.bot_profile_list = QListWidget()
-        self.bot_profile_list.setMaximumHeight(80)
-        self.bot_profile_list.setStyleSheet(f"QListWidget {{ background: {C_BG_INPUT}; border: 1px solid {C_BORDER}; border-radius: 6px; color: {C_TEXT}; }}")
-        profile_row.addWidget(self.bot_profile_list)
-        profile_btn_col = QVBoxLayout()
-        self.bot_profile_add = IconButton("添加配置", "＋", "outline")
-        self.bot_profile_add.clicked.connect(self._add_bot_profile)
-        self.bot_profile_del = IconButton("删除", "－", "danger")
-        self.bot_profile_del.clicked.connect(self._del_bot_profile)
-        self.bot_profile_load = IconButton("加载", "📂", "outline")
-        self.bot_profile_load.clicked.connect(self._load_bot_profile)
-        self.bot_profile_save = IconButton("保存到此", "💾", "success")
-        self.bot_profile_save.clicked.connect(self._save_bot_profile)
-        profile_btn_col.addWidget(self.bot_profile_add)
-        profile_btn_col.addWidget(self.bot_profile_del)
-        profile_btn_col.addWidget(self.bot_profile_load)
-        profile_btn_col.addWidget(self.bot_profile_save)
-        profile_row.addLayout(profile_btn_col)
-        profile_layout.addLayout(profile_row)
-        layout.addWidget(profile_box)
-
         self.bot_token = QLineEdit()
-        self.bot_token.setPlaceholderText("Bot Token (已弃用, 留空使用 AppSecret)")
+        self.bot_token.setPlaceholderText("Bot Token (旧, 留空)")
         self.bot_token.setEchoMode(QLineEdit.EchoMode.Password)
         off_form.addRow("Token(旧):", self.bot_token)
 
@@ -1217,49 +1238,14 @@ class MainWindow(QMainWindow):
         self.bot_sandbox_api_url = QLineEdit("https://sandbox.api.sgroup.qq.com")
         off_form.addRow("沙箱API:", self.bot_sandbox_api_url)
 
-        self.bot_use_sandbox = QCheckBox("使用沙箱环境")
-        off_form.addRow("", self.bot_use_sandbox)
+        # OneBot fields
+        self.bot_onebot_ws = QLineEdit("ws://127.0.0.1:8080")
+        off_form.addRow("OneBot WS:", self.bot_onebot_ws)
+
+        self.bot_onebot_http = QLineEdit("http://127.0.0.1:8080")
+        off_form.addRow("OneBot HTTP:", self.bot_onebot_http)
 
         layout.addWidget(official_box)
-
-        # OneBot协议
-        onebox = QGroupBox("OneBot 协议")
-        one_form = QFormLayout(onebox)
-        one_form.setSpacing(10)
-        one_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-
-        self.bot_onebot_ws = QLineEdit("ws://127.0.0.1:8080")
-        one_form.addRow("WebSocket:", self.bot_onebot_ws)
-        self.bot_onebot_http = QLineEdit("http://127.0.0.1:8080")
-        one_form.addRow("HTTP:", self.bot_onebot_http)
-
-        layout.addWidget(onebox)
-
-        # 协议选择
-        proto_box = QGroupBox("协议切换")
-        proto_layout = QHBoxLayout(proto_box)
-        self.bot_proto_combo = QComboBox()
-        self.bot_proto_combo.addItems(["QQ官方机器人", "OneBot 协议"])
-        self.bot_proto_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {C_BG_INPUT};
-                color: {C_TEXT};
-                border: 1px solid {C_BORDER};
-                border-radius: 6px;
-                padding: 8px 12px;
-                min-width: 180px;
-            }}
-            QComboBox::drop-down {{ border: none; }}
-            QComboBox QAbstractItemView {{
-                background-color: {C_BG_INPUT};
-                color: {C_TEXT};
-                selection-background-color: {C_PRIMARY};
-            }}
-        """)
-        proto_layout.addWidget(QLabel("选择协议:"))
-        proto_layout.addWidget(self.bot_proto_combo)
-        proto_layout.addStretch()
-        layout.addWidget(proto_box)
 
         # 用户权限管理
         auth_box = QGroupBox("用户权限管理")
