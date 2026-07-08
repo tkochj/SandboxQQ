@@ -1,0 +1,38 @@
+{
+  "happy": [
+    "happy_default.png"
+  ],
+  "sad": [
+    "sad_default.png"
+  ],
+  "angry": [
+    "angry_default.png"
+  ],
+  "love": [
+    "love_default.png"
+  ],
+  "surprise": [
+    "surprise_default.png"
+  ],
+  "fear": [
+    "fear_default.png"
+  ],
+  "disgust": [
+    "disgust_default.png"
+  ],
+  "cool": [
+    "cool_default.png"
+  ],
+  "laugh": [
+    "laugh_default.png"
+  ],
+  "shy": [
+    "shy_default.png"
+  ],
+  "awkward": [
+    "awkward_default.png"
+  ],
+  "cry": [
+    "cry_default.png"
+  ]
+}

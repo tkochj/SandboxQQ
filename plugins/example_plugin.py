@@ -28,3 +28,11 @@ class Plugin:
 
     async def hello_tool(self, name: str) -> str:
         return f"Hello, {name}! From example plugin"
+
+    def settings_widget(self):
+        from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.addWidget(QLabel("示例插件设置面板"))
+        layout.addWidget(QLabel("此插件无可用设置"))
+        return w

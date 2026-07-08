@@ -754,13 +754,23 @@ class MainWindow(QMainWindow):
         plugin_box = QGroupBox("插件管理")
         plugin_layout = QVBoxLayout(plugin_box)
         self.plugin_list_display = QListWidget()
-        self.plugin_list_display.setMaximumHeight(80)
+        self.plugin_list_display.setMaximumHeight(120)
         self.plugin_list_display.setStyleSheet(f"QListWidget {{ background: {C_BG_CARD}; color: {C_TEXT}; border: 1px solid {C_BORDER}; border-radius: 6px; }}")
+        self.plugin_list_display.itemDoubleClicked.connect(self._open_plugin_settings)
         plugin_layout.addWidget(self.plugin_list_display)
         plugin_btn_row = QHBoxLayout()
-        plugin_refresh_btn = IconButton("刷新插件", "🔄", "outline")
+        plugin_refresh_btn = IconButton("刷新", "🔄", "outline")
         plugin_refresh_btn.clicked.connect(self._refresh_plugin_list)
         plugin_btn_row.addWidget(plugin_refresh_btn)
+        plugin_new_btn = IconButton("新建插件", "＋", "outline")
+        plugin_new_btn.clicked.connect(self._new_plugin)
+        plugin_btn_row.addWidget(plugin_new_btn)
+        plugin_set_btn = IconButton("设置", "⚙", "outline")
+        plugin_set_btn.clicked.connect(self._open_plugin_settings)
+        plugin_btn_row.addWidget(plugin_set_btn)
+        plugin_open_btn = IconButton("打开目录", "📂", "outline")
+        plugin_open_btn.clicked.connect(self._open_plugin_folder)
+        plugin_btn_row.addWidget(plugin_open_btn)
         plugin_btn_row.addStretch()
         plugin_layout.addLayout(plugin_btn_row)
         layout.addWidget(plugin_box)
@@ -2037,15 +2047,92 @@ class MainWindow(QMainWindow):
 
     def _refresh_plugin_list(self):
         self.plugin_list_display.clear()
-        from ai.plugins import PluginManager
+        from ai.plugins import PluginManager, PLUGIN_DIR
         pm = PluginManager()
         pm.load_all()
         for p in pm.get_all():
             name = getattr(p, 'name', p.__class__.__name__)
             desc = getattr(p, 'description', '')
-            item = QListWidgetItem(f"{name} - {desc[:40]}")
+            item = QListWidgetItem(f"{name} - {desc[:50]}")
+            item.setData(Qt.ItemDataRole.UserRole, p)
             self.plugin_list_display.addItem(item)
         self._log(f"已加载 {self.plugin_list_display.count()} 个插件")
+
+    def _new_plugin(self):
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+        name, ok = QInputDialog.getText(self, "新建插件", "插件名称(英文):")
+        if not ok or not name.strip():
+            return
+        name = name.strip().replace(" ", "_")
+        from ai.plugins import PLUGIN_DIR
+        plugin_file = PLUGIN_DIR / f"{name}.py"
+        if plugin_file.exists():
+            QMessageBox.warning(self, "提示", "该插件已存在")
+            return
+        template = f"""# -*- coding: utf-8 -*-
+\"\"\"
+{name} - 自定义插件
+\"\"\"
+import logging
+logger = logging.getLogger(__name__)
+
+class Plugin:
+    name = "{name}"
+    description = "自定义插件"
+    version = "1.0"
+
+    async def on_message(self, content, sender, channel):
+        # 在此处理消息，返回字符串则作为回复
+        # sender = {{"id": "...", "name": "..."}}
+        # channel = {{"id": "...", "platform": "..."}}
+        return None
+
+    async def get_tool_definitions(self):
+        # 返回工具定义列表，格式:
+        # [{{"type": "function", "function": {{"name": "...", ...}}}}]
+        return []
+
+    async def settings_widget(self):
+        # 返回设置面板 (PyQt6 QWidget)，None 表示使用默认设置
+        return None
+"""
+        plugin_file.write_text(template, encoding="utf-8")
+        self._refresh_plugin_list()
+        self._log(f"已创建插件: {name}")
+
+    def _open_plugin_folder(self):
+        from ai.plugins import PLUGIN_DIR
+        os.startfile(str(PLUGIN_DIR))
+
+    def _open_plugin_settings(self):
+        item = self.plugin_list_display.currentItem()
+        if not item:
+            return
+        plugin = item.data(Qt.ItemDataRole.UserRole)
+        if not plugin:
+            return
+        # Check if plugin has settings_widget
+        sw = getattr(plugin, "settings_widget", None)
+        if sw:
+            try:
+                widget = sw()
+                if widget:
+                    from PyQt6.QtWidgets import QDialog, QVBoxLayout
+                    dlg = QDialog(self)
+                    dlg.setWindowTitle(f"{getattr(plugin, 'name', '插件')} 设置")
+                    dlg.setMinimumSize(400, 300)
+                    layout = QVBoxLayout(dlg)
+                    layout.addWidget(widget)
+                    from PyQt6.QtWidgets import QDialogButtonBox
+                    btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+                    btns.rejected.connect(dlg.reject)
+                    btns.accepted.connect(dlg.accept)
+                    layout.addWidget(btns)
+                    dlg.exec()
+                    return
+            except Exception as e:
+                self._log(f"插件设置出错: {e}")
+        self._log(f"{getattr(plugin, 'name', '插件')}: 无独立设置面板")
 
     def _on_chat_provider_changed(self, idx: int):
         self._log(f"[切换] 下拉框索引变化: {idx}, 文本: {self.chat_provider.currentText()}")

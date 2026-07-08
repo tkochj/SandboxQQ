@@ -31,6 +31,9 @@ class PluginBase:
     async def get_skill_prompts(self) -> list:
         return []
 
+    def settings_widget(self):
+        return None
+
 
 class PluginManager:
     def __init__(self):
