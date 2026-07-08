@@ -172,22 +172,34 @@ class SandboxManager:
                     self.fs_sandbox.activate()
 
                 if self.config.enable_network_isolation:
-                    self.net_sandbox = NetworkSandbox(
-                        root_dir,
-                        allowed_hosts=self.config.allowed_hosts,
-                    )
-                    self.net_sandbox.activate()
-                    self.proxy_sandbox = ProxySandbox(
-                        allowed_hosts=self.config.allowed_hosts,
-                    )
-                    import asyncio
-                    try:
-                        asyncio.run(self.proxy_sandbox.start())
-                        if self.proc_sandbox:
-                            self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
-                        logger.info(f"Proxy sandbox active: {self.proxy_sandbox.proxy_url}")
-                    except Exception as e:
-                        logger.warning(f"Proxy start failed (non-fatal): {e}")
+                    if self.config.allowed_hosts:
+                        self.net_sandbox = NetworkSandbox(
+                            root_dir,
+                            allowed_hosts=self.config.allowed_hosts,
+                        )
+                        self.net_sandbox.activate()
+                    # Start proxy in a background thread, only for subprocesses
+                    if self.config.allowed_hosts:
+                        try:
+                            self.proxy_sandbox = ProxySandbox(
+                                allowed_hosts=self.config.allowed_hosts,
+                            )
+                            import asyncio, threading
+                            proxy_loop = asyncio.new_event_loop()
+                            proxy_thread = threading.Thread(
+                                target=lambda: proxy_loop.run_until_complete(
+                                    self.proxy_sandbox.start()
+                                ),
+                                daemon=True,
+                            )
+                            proxy_thread.start()
+                            import time
+                            time.sleep(0.2)
+                            if self.proxy_sandbox.proxy_url and self.proc_sandbox:
+                                self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
+                                logger.info(f"Subprocess proxy: {self.proxy_sandbox.proxy_url}")
+                        except Exception as e:
+                            logger.warning(f"Proxy init failed (non-fatal): {e}")
 
                 self.stats["uptime"] = time.time()
                 self._start_monitor()
