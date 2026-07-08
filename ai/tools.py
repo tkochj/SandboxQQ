@@ -111,7 +111,7 @@ class ListFilesTool(SandboxTool):
             return f"目录: {rp or '/'} ({len(entries)}项)\n"+"\n".join(entries) if entries else "(空目录)"
         except Exception as e: return f"列出失败: {e}"
 
-ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl","wget","python","pip","npm","node","git"]
+ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl"]
 
 class RunShellTool(SandboxTool):
     name = "run_shell"; display_name = "Shell命令"

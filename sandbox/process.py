@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Optional, List, Dict
 
+from utils.win32_utils import HAS_PYWIN32
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,24 +71,39 @@ class ProcessSandbox:
             try:
                 import win32process, win32security, win32api
                 cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
+                sa = win32process.STARTUPINFO()
                 h_process = win32process.CreateProcessAsUser(
-                    self.restricted_token,
-                    None,
-                    cmd_line,
+                    self.restricted_token, None, cmd_line,
                     None, None, False,
                     win32process.CREATE_SUSPENDED | win32process.CREATE_NEW_CONSOLE,
-                    process_env,
-                    work_dir,
-                    win32process.STARTUPINFO(),
+                    process_env, work_dir, sa,
                 )
                 proc_handle, thread_handle, pid, tid = h_process
                 win32process.ResumeThread(thread_handle)
-                proc = subprocess.Popen(pid=pid)
-                proc.stdout = None
-                proc.stderr = None
+                import psutil
+                proc_psutil = psutil.Process(pid)
+                # Wrap as a Popen-compatible object for the caller
+                class _SandboxedProc:
+                    def __init__(self, psutil_proc, pid_val):
+                        self._proc = psutil_proc
+                        self.pid = pid_val
+                        self.stdout = None
+                        self.stderr = None
+                        self.returncode = None
+                    def communicate(self, timeout=None):
+                        try:
+                            self._proc.wait(timeout=timeout)
+                            self.returncode = self._proc.returncode
+                        except psutil.TimeoutExpired:
+                            raise subprocess.TimeoutExpired(self._proc.cmdline(), timeout)
+                        return (b"", b"")
+                    def kill(self):
+                        self._proc.kill()
+                proc = _SandboxedProc(proc_psutil, pid)
                 logger.info(f"Spawned with restricted token: PID {pid}")
             except Exception as e:
                 logger.warning(f"Restricted token failed, fallback: {e}")
+                proc = None
 
         if not proc:
             try:
