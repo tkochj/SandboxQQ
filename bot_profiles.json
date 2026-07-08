@@ -1,0 +1,22 @@
+[
+  {
+    "api_url": "https://api.sgroup.qq.com",
+    "app_id": "test123",
+    "app_secret": "yrWxA9vTnunTu63l",
+    "bot_token": "yrWxA9vTnunTu63l",
+    "enabled": true,
+    "intents": [
+      "GUILD_MESSAGES",
+      "DIRECT_MESSAGE",
+      "PUBLIC_GUILD_MESSAGES"
+    ],
+    "name": "1",
+    "onebot_http_url": "http://127.0.0.1:8080",
+    "onebot_ws_url": "ws://127.0.0.1:8080",
+    "protocol": "qq_official",
+    "sandbox_api_url": "https://sandbox.api.sgroup.qq.com",
+    "sandbox_root": "",
+    "use_sandbox": false,
+    "ws_url": "wss://api.sgroup.qq.com/websocket"
+  }
+]
