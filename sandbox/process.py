@@ -92,8 +92,7 @@ class ProcessSandbox:
                         self.returncode = None
                     def communicate(self, timeout=None):
                         try:
-                            self._proc.wait(timeout=timeout)
-                            self.returncode = self._proc.returncode
+                            self.returncode = self._proc.wait(timeout=timeout)
                         except psutil.TimeoutExpired:
                             raise subprocess.TimeoutExpired(self._proc.cmdline(), timeout)
                         return (b"", b"")

@@ -22,7 +22,7 @@ class AIAgent:
         self._on_tool: Optional[Callable] = None
         self._on_thinking: Optional[Callable] = None
         from ai.tools import set_tool_config
-        set_tool_config(config, getattr(self, '_sandbox_manager', None))
+        set_tool_config(config)
 
     def on_message(self, cb): self._on_message = cb
     def on_tool(self, cb): self._on_tool = cb
