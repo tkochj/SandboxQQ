@@ -9,5 +9,6 @@ build/
 conversation_memory.json
 ai_config.json
 bot_config.json
+bot_profiles.json
 sandbox_config.json
 user_config.json
