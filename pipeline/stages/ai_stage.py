@@ -15,6 +15,7 @@ from ai.tools import get_tool_definitions, get_tool_by_name, set_tool_config
 from ai.memory import ConversationMemory
 from ai.sub_agent import SubAgentManager
 from ai.skills import SkillsManager
+from ai.plugins import PluginManager
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,23 @@ class AIResponseStage(Stage):
             else:
                 sub_mgr = None
 
+            # Add plugin tools
+            plugin_mgr = PluginManager()
+            plugin_mgr.load_all()
+            for plug in plugin_mgr.get_all():
+                td = getattr(plug, "get_tool_definitions", None)
+                if td:
+                    try:
+                        import inspect
+                        if inspect.iscoroutinefunction(td):
+                            ptools = await td()
+                        else:
+                            ptools = td()
+                        if ptools:
+                            tools.extend(ptools)
+                    except Exception as e:
+                        logger.warning(f"插件工具加载失败: {e}")
+
             messages = [{"role": "system", "content": system}]
             messages.extend(self._memory.get_history(channel_key, system))
             if vision_analysis:
@@ -271,7 +289,12 @@ class AIResponseStage(Stage):
                     else:
                         tool = get_tool_by_name(tc.name)
                         if not tool:
-                            result = f"未知工具: {tc.name}"
+                            # Check plugin tools
+                            plugin_result = await self._run_plugin_tool(tc.name, tc.arguments)
+                            if plugin_result is not None:
+                                result = plugin_result
+                            else:
+                                result = f"未知工具: {tc.name}"
                         else:
                             if self._log:
                                 self._log(f"[AI] 调用工具: {tc.name}")
@@ -295,5 +318,23 @@ class AIResponseStage(Stage):
                 event.set_reply(f"AI 处理失败: {err[:200]}")
             logger.error(f"AI stage error: {err[:200]}")
         yield
+
+    async def _run_plugin_tool(self, tool_name: str, args: dict) -> Optional[str]:
+        from ai.plugins import PluginManager
+        pm = PluginManager()
+        pm.load_all()
+        for plug in pm.get_all():
+            if hasattr(plug, tool_name):
+                try:
+                    fn = getattr(plug, tool_name)
+                    import inspect
+                    if inspect.iscoroutinefunction(fn):
+                        result = await fn(**args)
+                    else:
+                        result = fn(**args)
+                    return str(result) if result else None
+                except Exception as e:
+                    return f"插件工具执行错误: {e}"
+        return None
 
 

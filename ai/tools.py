@@ -537,6 +537,23 @@ class ChartTool(SandboxTool):
         except ImportError: return "错误: 需要安装 matplotlib (pip install matplotlib)"
         except Exception as e: return f"创建图表失败: {e}"
 
+class SendFileTool(SandboxTool):
+    name = "send_file"; display_name = "发送文件给用户"
+    description = "将沙盒内的文件发送给QQ用户。支持图片/视频/音频/文档等格式。"
+    permission_key = "read_file"
+    _last_file = ""
+    parameters = {"type":"object","properties":{"file_path":{"type":"string","description":"文件路径(相对沙盒根目录)"},"description":{"type":"string","description":"文件描述","default":""}},"required":["file_path"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        fp = kwargs.get("file_path",""); desc = kwargs.get("description","")
+        ap = _resolve(sandbox_root, fp)
+        if not ap: return f"错误: 路径超出沙盒: {fp}"
+        if not os.path.isfile(ap): return f"错误: 文件不存在: {fp}"
+        size = os.path.getsize(ap)
+        fname = os.path.basename(ap)
+        self._last_file = ap
+        return f"已准备发送文件: {fname} ({_fmt_size(size)})\n{('描述: '+desc) if desc else ''}"
+
 TOOL_REGISTRY: List[SandboxTool] = [
     ExecutePythonTool(), ReadFileTool(), WriteFileTool(),
     ListFilesTool(), RunShellTool(),
@@ -545,6 +562,7 @@ TOOL_REGISTRY: List[SandboxTool] = [
     WebSearchTool(),
     PdfExtractTool(), OcrTool(), TranslateTool(), HashTool(),
     DateTimeTool(), DataConvertTool(), QRCodeTool(), ChartTool(),
+    SendFileTool(),
 ]
 
 def get_tool_definitions(perms: Optional[ToolPermissions] = None) -> List[dict]:

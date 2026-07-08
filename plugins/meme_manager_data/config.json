@@ -1,0 +1,26 @@
+{
+  "happy": [
+    "https://media.giphy.com/media/26BRzozg4TCBXv6QU/giphy.gif"
+  ],
+  "sad": [
+    "https://media.giphy.com/media/13GEqpi85CQk7S/giphy.gif"
+  ],
+  "angry": [
+    "https://media.giphy.com/media/3og0INyCmHlNylU9Sg/giphy.gif"
+  ],
+  "love": [
+    "https://media.giphy.com/media/l2QDM9Jnim1YVILXa/giphy.gif"
+  ],
+  "surprise": [
+    "https://media.giphy.com/media/26gJzV3sA3GQ3p0H6/giphy.gif"
+  ],
+  "cool": [
+    "https://media.giphy.com/media/26FPCXdkvDbHr1Kju/giphy.gif"
+  ],
+  "laugh": [
+    "https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif"
+  ],
+  "cry": [
+    "https://media.giphy.com/media/3o6Zt6eXqWQqKjXK0/giphy.gif"
+  ]
+}

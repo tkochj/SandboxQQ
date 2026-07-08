@@ -233,8 +233,9 @@ class QQOfficialPlatform(Platform):
         if not self._client:
             logger.warning("Bot client not ready")
             return False
+        import random
         try:
-            kwargs = {"content": content, "msg_id": msg_id or None}
+            kwargs = {"content": content, "msg_id": msg_id or None, "msg_seq": random.randint(1, 99999)}
             if "GROUP" in event_type:
                 await self._client.api.post_group_message(
                     group_openid=channel_id, **kwargs)
@@ -310,16 +311,19 @@ class QQOfficialPlatform(Platform):
                 logger.warning("File upload failed: no file_info")
                 return False
 
+            import random
             if "GROUP" in event_type:
                 await self._client.api.post_group_message(
                     group_openid=channel_id, msg_type=7,
                     media={"file_info": file_info},
-                    content=content or "", msg_id=msg_id or None)
+                    content=content or "", msg_id=msg_id or None,
+                    msg_seq=random.randint(1, 99999))
             else:
                 await self._client.api.post_c2c_message(
                     openid=channel_id, msg_type=7,
                     media={"file_info": file_info},
-                    content=content or "", msg_id=msg_id or None)
+                    content=content or "", msg_id=msg_id or None,
+                    msg_seq=random.randint(1, 99999))
             return True
         except Exception as e:
             logger.error(f"Send file error: {e}")

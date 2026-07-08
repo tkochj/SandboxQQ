@@ -14,10 +14,16 @@ class FileSystemSandbox:
     def __init__(self, sandbox_root: str, blocked_dirs: Optional[List[str]] = None):
         self.sandbox_root = Path(sandbox_root).resolve()
         self.blocked_dirs = [Path(d).resolve() for d in (blocked_dirs or [])]
+        self._allowed_write_dirs = [Path(sandbox_root).resolve()]
         self._original_open = None
         self._original_os_open = None
         self._active = False
         self._stats = {"blocked_count": 0, "redirected_count": 0}
+
+    def add_allowed_write_dir(self, path: str):
+        p = Path(path).resolve()
+        if p not in self._allowed_write_dirs:
+            self._allowed_write_dirs.append(p)
 
     def activate(self):
         if self._active:
@@ -65,15 +71,17 @@ class FileSystemSandbox:
             is_read = "r" in mode or "+" in mode
 
             if is_write:
-                try:
-                    abs_path_obj.relative_to(self.sandbox_root)
-                    return True
-                except ValueError:
-                    self._stats["blocked_count"] += 1
-                    logger.warning(
-                        f"Blocked write access outside sandbox: {abs_path}"
-                    )
-                    return False
+                for allowed in self._allowed_write_dirs:
+                    try:
+                        abs_path_obj.relative_to(allowed)
+                        return True
+                    except ValueError:
+                        pass
+                self._stats["blocked_count"] += 1
+                logger.warning(
+                    f"Blocked write access outside sandbox: {abs_path}"
+                )
+                return False
 
             return True
 

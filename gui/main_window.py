@@ -751,6 +751,20 @@ class MainWindow(QMainWindow):
         prov_layout.addLayout(prov_btn_row)
         layout.addWidget(prov_box)
 
+        plugin_box = QGroupBox("插件管理")
+        plugin_layout = QVBoxLayout(plugin_box)
+        self.plugin_list_display = QListWidget()
+        self.plugin_list_display.setMaximumHeight(80)
+        self.plugin_list_display.setStyleSheet(f"QListWidget {{ background: {C_BG_CARD}; color: {C_TEXT}; border: 1px solid {C_BORDER}; border-radius: 6px; }}")
+        plugin_layout.addWidget(self.plugin_list_display)
+        plugin_btn_row = QHBoxLayout()
+        plugin_refresh_btn = IconButton("刷新插件", "🔄", "outline")
+        plugin_refresh_btn.clicked.connect(self._refresh_plugin_list)
+        plugin_btn_row.addWidget(plugin_refresh_btn)
+        plugin_btn_row.addStretch()
+        plugin_layout.addLayout(plugin_btn_row)
+        layout.addWidget(plugin_box)
+
         btn_row = QHBoxLayout()
         self.ai_btn_save = IconButton("保存配置", "💾")
         self.ai_btn_save.clicked.connect(self._save_ai_config)
@@ -1563,6 +1577,8 @@ class MainWindow(QMainWindow):
         self.sandbox.config.enable_process_isolation = self.chk_proc_iso.isChecked()
 
         if self.sandbox.start(root):
+            if self.sandbox.fs_sandbox:
+                self.sandbox.fs_sandbox.add_allowed_write_dir(str(APP_DIR))
             self.event_bus.start()
             self._log(f"沙盒已启动 | 目录: {root}")
             self.dash_btn_start.setEnabled(False)
@@ -2018,6 +2034,18 @@ class MainWindow(QMainWindow):
         self.event_bus.set_pipeline(self.pipeline)
         self.bot_manager.set_event_bus(self.event_bus)
         self._log("事件总线 + 消息管道已初始化")
+
+    def _refresh_plugin_list(self):
+        self.plugin_list_display.clear()
+        from ai.plugins import PluginManager
+        pm = PluginManager()
+        pm.load_all()
+        for p in pm.get_all():
+            name = getattr(p, 'name', p.__class__.__name__)
+            desc = getattr(p, 'description', '')
+            item = QListWidgetItem(f"{name} - {desc[:40]}")
+            self.plugin_list_display.addItem(item)
+        self._log(f"已加载 {self.plugin_list_display.count()} 个插件")
 
     def _on_chat_provider_changed(self, idx: int):
         self._log(f"[切换] 下拉框索引变化: {idx}, 文本: {self.chat_provider.currentText()}")
@@ -2815,6 +2843,7 @@ class MainWindow(QMainWindow):
 
         self._load_user_config()
         self._load_bot_profiles()
+        self._refresh_plugin_list()
 
     def _show_about(self):
         QMessageBox.about(self, "关于 SandboxQQ",

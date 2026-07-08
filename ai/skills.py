@@ -115,6 +115,8 @@ class SkillsManager:
         return [s.to_dict() for s in self.skills]
 
     def load_from_config(self, skills_data: list):
-        loaded = [SkillConfig.from_dict(s) for s in skills_data]
-        for s in loaded:
-            self.add(s)
+        for s in skills_data:
+            if isinstance(s, dict):
+                self.add(SkillConfig.from_dict(s))
+            elif isinstance(s, SkillConfig):
+                self.add(s)
