@@ -1,0 +1,9 @@
+{
+  "protocol": "qq_official",
+  "app_id": "your-app-id",
+  "app_secret": "your-app-secret",
+  "ws_url": "wss://api.sgroup.qq.com/websocket",
+  "api_url": "https://api.sgroup.qq.com",
+  "intents": ["GUILD_MESSAGES", "DIRECT_MESSAGE", "PUBLIC_GUILD_MESSAGES"],
+  "enabled": true
+}

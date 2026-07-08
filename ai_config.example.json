@@ -1,0 +1,31 @@
+{
+  "provider": "deepseek",
+  "api_key": "sk-your-key-here",
+  "api_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "temperature": 0.7,
+  "max_tokens": 4096,
+  "system_prompt": "你是一个安全的 AI 助手，运行在沙盒环境中。你可以使用工具在沙盒内执行 Python 代码、读写文件、运行命令来帮助用户处理任务。所有操作都被限制在沙盒目录内，不会影响外部系统。",
+  "enable_tools": true,
+  "max_tool_rounds": 10,
+  "context_mode": "truncation",
+  "context_window": 32000,
+  "image_gen_api_url": "",
+  "image_gen_api_key": "",
+  "image_gen_model": "",
+  "video_gen_api_url": "",
+  "video_gen_api_key": "",
+  "video_gen_model": "",
+  "vision_api_url": "",
+  "vision_api_key": "",
+  "vision_model": "",
+  "tool_permissions": {
+    "execute_python": true,
+    "read_file": true,
+    "write_file": true,
+    "list_files": true,
+    "run_shell": false
+  },
+  "providers": [],
+  "active_provider": "default"
+}
