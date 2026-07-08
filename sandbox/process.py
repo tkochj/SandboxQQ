@@ -46,6 +46,9 @@ class ProcessSandbox:
         self._processes: Dict[int, SandboxedProcess] = {}
         self._lock = threading.Lock()
 
+    def set_proxy_url(self, proxy_url: str):
+        self._proxy_url = proxy_url
+
     def spawn(
         self,
         cmd,
@@ -65,6 +68,12 @@ class ProcessSandbox:
 
         if self.sandbox_root:
             process_env["SANDBOX_ROOT"] = str(self.sandbox_root)
+        proxy = getattr(self, '_proxy_url', '')
+        if proxy:
+            process_env["HTTP_PROXY"] = proxy
+            process_env["HTTPS_PROXY"] = proxy
+            process_env["http_proxy"] = proxy
+            process_env["https_proxy"] = proxy
 
         proc = None
         if self.restricted_token and HAS_PYWIN32:

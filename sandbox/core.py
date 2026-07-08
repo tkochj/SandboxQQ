@@ -12,6 +12,7 @@ from utils.win32_utils import JobObjectManager, TokenManager, HAS_PYWIN32
 from sandbox.filesystem import FileSystemSandbox
 from sandbox.network import NetworkSandbox
 from sandbox.process import ProcessSandbox
+from sandbox.proxy import ProxySandbox
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class SandboxManager:
         self.fs_sandbox: Optional[FileSystemSandbox] = None
         self.net_sandbox: Optional[NetworkSandbox] = None
         self.proc_sandbox: Optional[ProcessSandbox] = None
+        self.proxy_sandbox: Optional[ProxySandbox] = None
 
         self._monitor_thread: Optional[threading.Thread] = None
         self._stop_monitor = threading.Event()
@@ -175,6 +177,17 @@ class SandboxManager:
                         allowed_hosts=self.config.allowed_hosts,
                     )
                     self.net_sandbox.activate()
+                    self.proxy_sandbox = ProxySandbox(
+                        allowed_hosts=self.config.allowed_hosts,
+                    )
+                    import asyncio
+                    try:
+                        asyncio.run(self.proxy_sandbox.start())
+                        if self.proc_sandbox:
+                            self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
+                        logger.info(f"Proxy sandbox active: {self.proxy_sandbox.proxy_url}")
+                    except Exception as e:
+                        logger.warning(f"Proxy start failed (non-fatal): {e}")
 
                 self.stats["uptime"] = time.time()
                 self._start_monitor()
@@ -198,6 +211,12 @@ class SandboxManager:
 
         if self.net_sandbox:
             self.net_sandbox.deactivate()
+        if self.proxy_sandbox:
+            import asyncio
+            try:
+                asyncio.run(self.proxy_sandbox.stop())
+            except Exception:
+                pass
         if self.fs_sandbox:
             self.fs_sandbox.deactivate()
         if self.proc_sandbox:
