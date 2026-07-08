@@ -30,12 +30,14 @@ class AIResponseStage(Stage):
         get_sandbox_root: Callable = None,
         memory: Optional[ConversationMemory] = None,
         log_func: Optional[Callable] = None,
+        sandbox_manager=None,
     ):
         self._provider_manager = provider_manager
         self._get_config = get_config
         self._get_sandbox_root = get_sandbox_root
         self._memory = memory or ConversationMemory()
         self._log = log_func
+        self._sandbox_manager = sandbox_manager
 
     async def _analyze_image(self, img_path: str, config) -> str:
         if not os.path.isfile(img_path):
@@ -236,7 +238,7 @@ class AIResponseStage(Stage):
                 messages.append({"role": "system", "content": f"用户附带了一张图片，自动识图结果:\n{vision_analysis[:500]}"})
             messages.append({"role": "user", "content": user_content})
 
-            set_tool_config(config)
+            set_tool_config(config, self._sandbox_manager)
 
             for rnd in range(max_rounds):
                 # Thinking mode

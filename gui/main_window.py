@@ -2005,7 +2005,9 @@ class MainWindow(QMainWindow):
             return
         self._pipeline_initialized = True
 
-        auth_stage = AuthStage(auth_check=lambda uid: True)
+        auth_stage = AuthStage(
+            auth_check=lambda uid: not self._auth_enabled or uid in self._authorized_ids
+        )
         sandbox_stage = SandboxCheckStage(
             is_sandbox_running=lambda: self.sandbox.state == SandboxState.RUNNING
         )
@@ -2018,6 +2020,7 @@ class MainWindow(QMainWindow):
             get_sandbox_root=lambda: self.sandbox.config.root_dir or "",
             memory=self.conv_memory,
             log_func=lambda msg: self._log(msg, "info"),
+            sandbox_manager=self.sandbox,
         )
         send_file_func = lambda cid, path, text, mid, etype: self.bot_manager.send_file(cid, path, text, mid, etype)
         respond_stage = RespondStage(
