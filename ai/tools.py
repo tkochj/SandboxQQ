@@ -309,11 +309,242 @@ class SystemInfoTool(SandboxTool):
             except: lines.append("内存: 无法获取(无psutil)")
         return "\n".join(lines) if lines else "未知类型"
 
+class WebSearchTool(SandboxTool):
+    name = "web_search"; display_name = "搜索网络"
+    description = "搜索互联网获取实时信息。当用户询问最新信息、时事、或需要联网查询时使用。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{"query":{"type":"string","description":"搜索关键词"}},"required":["query"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        query = kwargs.get("query","")
+        if not query: return "错误: 搜索词不能为空"
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1")
+                data = r.json()
+                results = []
+                for topic in data.get("RelatedTopics", [])[:5]:
+                    if "Text" in topic:
+                        results.append(topic["Text"])
+                return "\n".join(results) if results else "无搜索结果"
+        except Exception as e: return f"搜索失败: {e}"
+
+class PdfExtractTool(SandboxTool):
+    name = "pdf_extract"; display_name = "提取PDF文本"
+    description = "从PDF文件中提取文本内容。需要安装 PyMuPDF(fitz)。"
+    permission_key = "read_file"
+    parameters = {"type":"object","properties":{"path":{"type":"string","description":"PDF路径(相对沙盒根目录)"}},"required":["path"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        rp = kwargs.get("path","")
+        ap = _resolve(sandbox_root, rp)
+        if not ap: return f"错误: 路径超出沙盒: {rp}"
+        if not os.path.isfile(ap): return f"错误: 文件不存在: {rp}"
+        try:
+            import fitz
+            doc = fitz.open(ap)
+            text = "\n".join([page.get_text() for page in doc])
+            doc.close()
+            if len(text) > 10000: text = text[:10000] + "\n...(截断)"
+            return text or "(无文本内容)"
+        except ImportError: return "错误: 需要安装 PyMuPDF (pip install PyMuPDF)"
+        except Exception as e: return f"PDF提取失败: {e}"
+
+class OcrTool(SandboxTool):
+    name = "ocr_image"; display_name = "图片文字识别(OCR)"
+    description = "从图片中识别提取文字。需要安装 pytesseract 和 Tesseract-OCR。"
+    permission_key = "read_file"
+    parameters = {"type":"object","properties":{"image_path":{"type":"string","description":"图片路径(相对沙盒根目录)"},"lang":{"type":"string","description":"语言(chi_sim=中文,eng=英文)","default":"chi_sim+eng"}},"required":["image_path"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        ip = kwargs.get("image_path",""); lang = kwargs.get("lang","chi_sim+eng")
+        ap = _resolve(sandbox_root, ip)
+        if not ap: return f"错误: 路径超出沙盒: {ip}"
+        if not os.path.isfile(ap): return f"错误: 文件不存在: {ip}"
+        try:
+            import pytesseract
+            from PIL import Image
+            img = Image.open(ap)
+            text = pytesseract.image_to_string(img, lang=lang)
+            return text.strip() or "(未识别到文字)"
+        except ImportError: return "错误: 需要安装 pytesseract (pip install pytesseract)"
+        except Exception as e: return f"OCR失败: {e}"
+
+class TranslateTool(SandboxTool):
+    name = "translate"; display_name = "翻译"
+    description = "翻译文本。支持多语言互译（中/英/日/韩/法等）。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{"text":{"type":"string","description":"要翻译的文本"},"target_lang":{"type":"string","description":"目标语言: zh/en/ja/ko/fr/de/es","default":"zh"}},"required":["text"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        text = kwargs.get("text",""); target = kwargs.get("target_lang","zh")
+        if not text: return "错误: 文本不能为空"
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15) as c:
+                resp = await c.post("https://api.mymemory.translated.net/get", data={"q": text, "langpair": f"auto|{target}"})
+                data = resp.json()
+                return data.get("responseData", {}).get("translatedText", "") or "(翻译失败)"
+        except Exception as e: return f"翻译失败: {e}"
+
+class HashTool(SandboxTool):
+    name = "hash_text"; display_name = "哈希/加密"
+    description = "计算文本的哈希值(MD5/SHA1/SHA256)或Base64编解码。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{"text":{"type":"string","description":"要处理的文本"},"algorithm":{"type":"string","description":"算法: md5/sha1/sha256/base64_encode/base64_decode","default":"md5"}},"required":["text"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        text = kwargs.get("text",""); algo = kwargs.get("algorithm","md5")
+        import hashlib, base64
+        try:
+            if algo == "md5": return hashlib.md5(text.encode()).hexdigest()
+            if algo == "sha1": return hashlib.sha1(text.encode()).hexdigest()
+            if algo == "sha256": return hashlib.sha256(text.encode()).hexdigest()
+            if algo == "base64_encode": return base64.b64encode(text.encode()).decode()
+            if algo == "base64_decode":
+                try: return base64.b64decode(text).decode()
+                except: return "(Base64解码失败，非有效编码)"
+            return f"未知算法: {algo}"
+        except Exception as e: return f"错误: {e}"
+
+class DateTimeTool(SandboxTool):
+    name = "datetime_tool"; display_name = "日期时间"
+    description = "获取当前时间/日期，或进行时间格式转换、时区查询。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{"action":{"type":"string","description":"操作: now/timestamp/format","default":"now"},"format":{"type":"string","description":"时间格式(如 %Y-%m-%d %H:%M:%S)","default":""},"timestamp":{"type":"integer","description":"时间戳(秒)","default":0}}}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        action = kwargs.get("action","now"); fmt = kwargs.get("format",""); ts = kwargs.get("timestamp",0)
+        from datetime import datetime, timezone
+        try:
+            if action == "now":
+                now = datetime.now()
+                return now.strftime(fmt or "%Y-%m-%d %H:%M:%S")
+            if action == "timestamp":
+                return str(int(datetime.now().timestamp()))
+            if action == "format" and ts > 0:
+                dt = datetime.fromtimestamp(ts)
+                return dt.strftime(fmt or "%Y-%m-%d %H:%M:%S")
+            return datetime.now().isoformat()
+        except Exception as e: return f"错误: {e}"
+
+class DataConvertTool(SandboxTool):
+    name = "convert_data"; display_name = "数据格式转换"
+    description = "在CSV/JSON/XML/YAML之间转换数据格式。"
+    permission_key = "read_file"
+    parameters = {"type":"object","properties":{"input_path":{"type":"string","description":"输入文件路径(相对沙盒根目录)"},"output_format":{"type":"string","description":"目标格式: json/csv/yaml/xml"},"output_path":{"type":"string","description":"输出文件路径(可选)","default":""}},"required":["input_path","output_format"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        ip = kwargs.get("input_path",""); of = kwargs.get("output_format","json"); op = kwargs.get("output_path","")
+        ap = _resolve(sandbox_root, ip)
+        if not ap or not os.path.isfile(ap): return "错误: 文件不存在"
+        try:
+            ext = os.path.splitext(ap)[1].lower()
+            import csv, json, io
+            data = None
+            with open(ap, "r", encoding="utf-8") as f:
+                if ext == ".csv":
+                    reader = csv.DictReader(f)
+                    data = [row for row in reader]
+                elif ext in (".json",):
+                    data = json.load(f)
+                elif ext in (".yaml", ".yml"):
+                    import yaml
+                    data = yaml.safe_load(f)
+                else: return f"不支持输入格式: {ext}"
+            if data is None: return "错误: 无法读取数据"
+            out = ""
+            if of == "json":
+                out = json.dumps(data, ensure_ascii=False, indent=2)
+            elif of == "csv":
+                if isinstance(data, list) and data:
+                    output = io.StringIO()
+                    w = csv.DictWriter(output, fieldnames=data[0].keys())
+                    w.writeheader(); w.writerows(data)
+                    out = output.getvalue()
+                else: return "数据格式无法转为CSV"
+            elif of == "yaml":
+                import yaml
+                out = yaml.dump(data, allow_unicode=True)
+            elif of == "xml":
+                out = json.dumps(data, ensure_ascii=False, indent=2) + "\n(XML转换需安装dicttoxml)"
+            else: return f"不支持输出格式: {of}"
+            if op:
+                op_path = _resolve(sandbox_root, op)
+                if op_path:
+                    with open(op_path, "w", encoding="utf-8") as f:
+                        f.write(out)
+                    return f"已转换并保存到: {op} ({len(out)}字符)"
+            return f"转换结果:\n{out[:3000]}"
+        except ImportError as e: return f"需要安装依赖: {e}"
+        except Exception as e: return f"转换失败: {e}"
+
+class QRCodeTool(SandboxTool):
+    name = "qrcode"; display_name = "二维码生成"
+    description = "生成二维码图片并保存到沙盒。需要安装 qrcode 和 Pillow。"
+    permission_key = "write_file"
+    parameters = {"type":"object","properties":{"text":{"type":"string","description":"二维码内容(URL/文本)"},"filename":{"type":"string","description":"文件名","default":"qrcode.png"}},"required":["text"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        text = kwargs.get("text",""); fname = kwargs.get("filename","qrcode.png")
+        if not text: return "错误: 内容不能为空"
+        ap = _resolve(sandbox_root, fname)
+        if not ap: return "错误: 路径超出沙盒"
+        try:
+            import qrcode
+            img = qrcode.make(text)
+            img.save(ap)
+            return f"二维码已生成: {fname} (内容: {text[:50]})"
+        except ImportError: return "错误: 需要安装 qrcode (pip install qrcode[pil])"
+        except Exception as e: return f"生成失败: {e}"
+
+class ChartTool(SandboxTool):
+    name = "create_chart"; display_name = "创建图表"
+    description = "根据数据创建图表(折线图/柱状图/饼图/散点图)。需要安装 matplotlib。"
+    permission_key = "execute_python"
+    parameters = {"type":"object","properties":{"data":{"type":"string","description":"数据(JSON数组,如[{\"x\":\"A\",\"y\":10},...])"},"chart_type":{"type":"string","description":"图表类型: line/bar/pie/scatter","default":"bar"},"title":{"type":"string","description":"图表标题","default":""},"filename":{"type":"string","description":"保存文件名","default":"chart.png"}},"required":["data"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        data_json = kwargs.get("data","[]"); ct = kwargs.get("chart_type","bar"); title = kwargs.get("title",""); fname = kwargs.get("filename","chart.png")
+        ap = _resolve(sandbox_root, fname)
+        if not ap: return "错误: 路径超出沙盒"
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import json
+            data = json.loads(data_json) if isinstance(data_json, str) else data_json
+            if not data: return "错误: 数据为空"
+            plt.rcParams["font.sans-serif"] = ["SimHei", "DejaVu Sans"]
+            plt.rcParams["axes.unicode_minus"] = False
+            fig, ax = plt.subplots(figsize=(8, 5))
+            if ct == "bar":
+                ax.bar([d.get("x",d.get("label","")) for d in data], [d.get("y",d.get("value",0)) for d in data])
+            elif ct == "line":
+                ax.plot([d.get("x",d.get("label","")) for d in data], [d.get("y",d.get("value",0)) for d in data], marker="o")
+            elif ct == "pie":
+                ax.pie([d.get("y",d.get("value",0)) for d in data], labels=[d.get("x",d.get("label","")) for d in data], autopct="%1.1f%%")
+            elif ct == "scatter":
+                xs = [d.get("x",i) for i,d in enumerate(data)]
+                ys = [d.get("y",d.get("value",0)) for d in data]
+                ax.scatter(xs, ys)
+            if title: ax.set_title(title)
+            plt.tight_layout()
+            fig.savefig(ap, dpi=150)
+            plt.close(fig)
+            return f"图表已保存: {fname}"
+        except ImportError: return "错误: 需要安装 matplotlib (pip install matplotlib)"
+        except Exception as e: return f"创建图表失败: {e}"
+
 TOOL_REGISTRY: List[SandboxTool] = [
     ExecutePythonTool(), ReadFileTool(), WriteFileTool(),
     ListFilesTool(), RunShellTool(),
     GenerateImageTool(), AnalyzeImageTool(), GenerateVideoTool(),
     WebDownloadTool(), CompressTool(), SearchFilesTool(), SystemInfoTool(),
+    WebSearchTool(),
+    PdfExtractTool(), OcrTool(), TranslateTool(), HashTool(),
+    DateTimeTool(), DataConvertTool(), QRCodeTool(), ChartTool(),
 ]
 
 def get_tool_definitions(perms: Optional[ToolPermissions] = None) -> List[dict]:

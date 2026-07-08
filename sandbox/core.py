@@ -25,13 +25,7 @@ class SandboxConfig:
         self.active_process_limit: int = 10
         self.memory_limit_mb: int = 512
         self.cpu_rate_limit: int = 0
-        self.allowed_hosts: list = [
-            "api.sgroup.qq.com",
-            "api.qq.com",
-            "bots.qq.com",
-            "wss://api.sgroup.qq.com",
-            "wss://api.qq.com",
-        ]
+        self.allowed_hosts: list = []
         sysroot = os.environ.get("SYSTEMROOT", "C:\\Windows")
         self.blocked_dirs: list = list(dict.fromkeys([
             "C:\\Windows",
@@ -61,11 +55,10 @@ class SandboxConfig:
         for key, value in data.items():
             if hasattr(config, key):
                 setattr(config, key, value)
-        required_hosts = [
+        for h in [
             "api.sgroup.qq.com", "api.qq.com", "bots.qq.com",
             "wss://api.sgroup.qq.com", "wss://api.qq.com",
-        ]
-        for h in required_hosts:
+        ]:
             if h not in config.allowed_hosts:
                 config.allowed_hosts.append(h)
         return config

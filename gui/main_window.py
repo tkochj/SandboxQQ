@@ -1154,6 +1154,31 @@ class MainWindow(QMainWindow):
         self.bot_appsecret.setEchoMode(QLineEdit.EchoMode.Password)
         off_form.addRow("AppSecret:", self.bot_appsecret)
 
+        # Bot profile management
+        profile_box = QGroupBox("机器人配置管理")
+        profile_layout = QVBoxLayout(profile_box)
+        profile_row = QHBoxLayout()
+        self.bot_profile_list = QListWidget()
+        self.bot_profile_list.setMaximumHeight(80)
+        self.bot_profile_list.setStyleSheet(f"QListWidget {{ background: {C_BG_INPUT}; border: 1px solid {C_BORDER}; border-radius: 6px; color: {C_TEXT}; }}")
+        profile_row.addWidget(self.bot_profile_list)
+        profile_btn_col = QVBoxLayout()
+        self.bot_profile_add = IconButton("添加配置", "＋", "outline")
+        self.bot_profile_add.clicked.connect(self._add_bot_profile)
+        self.bot_profile_del = IconButton("删除", "－", "danger")
+        self.bot_profile_del.clicked.connect(self._del_bot_profile)
+        self.bot_profile_load = IconButton("加载", "📂", "outline")
+        self.bot_profile_load.clicked.connect(self._load_bot_profile)
+        self.bot_profile_save = IconButton("保存到此", "💾", "success")
+        self.bot_profile_save.clicked.connect(self._save_bot_profile)
+        profile_btn_col.addWidget(self.bot_profile_add)
+        profile_btn_col.addWidget(self.bot_profile_del)
+        profile_btn_col.addWidget(self.bot_profile_load)
+        profile_btn_col.addWidget(self.bot_profile_save)
+        profile_row.addLayout(profile_btn_col)
+        profile_layout.addLayout(profile_row)
+        layout.addWidget(profile_box)
+
         self.bot_token = QLineEdit()
         self.bot_token.setPlaceholderText("Bot Token (已弃用, 留空使用 AppSecret)")
         self.bot_token.setEchoMode(QLineEdit.EchoMode.Password)
@@ -1653,6 +1678,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "失败", f"{msg_type}消息发送失败，请检查连接")
 
+    BOT_PROFILES_FILE = str(APP_DIR / "bot_profiles.json")
+
     def _get_bot_config(self) -> BotConfig:
         config = BotConfig()
         config.protocol = BotProtocol.QQ_OFFICIAL if self.bot_proto_combo.currentIndex() == 0 else BotProtocol.ONEBOT
@@ -1667,6 +1694,87 @@ class MainWindow(QMainWindow):
         config.onebot_http_url = self.bot_onebot_http.text().strip()
         config.enabled = True
         return config
+
+    def _apply_bot_config_to_ui(self, cfg: BotConfig):
+        self.bot_appid.setText(cfg.app_id)
+        self.bot_appsecret.setText(cfg.app_secret)
+        self.bot_token.setText(cfg.bot_token)
+        self.bot_ws_url.setText(cfg.ws_url)
+        self.bot_api_url.setText(cfg.api_url)
+        self.bot_sandbox_api_url.setText(cfg.sandbox_api_url)
+        self.bot_use_sandbox.setChecked(cfg.use_sandbox)
+        self.bot_onebot_ws.setText(cfg.onebot_ws_url)
+        self.bot_onebot_http.setText(cfg.onebot_http_url)
+        self.bot_proto_combo.setCurrentIndex(0 if cfg.protocol == BotProtocol.QQ_OFFICIAL else 1)
+
+    def _load_bot_profiles(self):
+        path = self.BOT_PROFILES_FILE
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                profiles = json.load(f)
+            self.bot_profile_list.clear()
+            for p in profiles:
+                item = QListWidgetItem(p.get("name", "未命名"))
+                item.setData(Qt.ItemDataRole.UserRole, p)
+                self.bot_profile_list.addItem(item)
+        except Exception as e:
+            logger.warning(f"加载机器人配置失败: {e}")
+
+    def _save_bot_profiles(self):
+        profiles = []
+        for i in range(self.bot_profile_list.count()):
+            item = self.bot_profile_list.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data:
+                profiles.append(data)
+        try:
+            with open(self.BOT_PROFILES_FILE, "w", encoding="utf-8") as f:
+                json.dump(profiles, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"保存机器人配置失败: {e}")
+
+    def _add_bot_profile(self):
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "添加机器人配置", "配置名称:")
+        if ok and name.strip():
+            cfg = self._get_bot_config()
+            data = cfg.to_dict()
+            data["name"] = name.strip()
+            item = QListWidgetItem(name.strip())
+            item.setData(Qt.ItemDataRole.UserRole, data)
+            self.bot_profile_list.addItem(item)
+            self._save_bot_profiles()
+            self._log(f"已添加机器人配置: {name.strip()}")
+
+    def _del_bot_profile(self):
+        item = self.bot_profile_list.currentItem()
+        if item:
+            self.bot_profile_list.takeItem(self.bot_profile_list.row(item))
+            self._save_bot_profiles()
+
+    def _load_bot_profile(self):
+        item = self.bot_profile_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data:
+            cfg = BotConfig.from_dict(data)
+            self._apply_bot_config_to_ui(cfg)
+            self._log(f"已加载机器人配置: {item.text()}")
+
+    def _save_bot_profile(self):
+        item = self.bot_profile_list.currentItem()
+        if not item:
+            return
+        cfg = self._get_bot_config()
+        data = cfg.to_dict()
+        name = item.text()
+        data["name"] = name
+        item.setData(Qt.ItemDataRole.UserRole, data)
+        self._save_bot_profiles()
+        self._log(f"已保存机器人配置: {name}")
 
     def _add_auth_user(self):
         user_id, ok = QInputDialog.getText(self, "添加授权用户", "输入用户ID:")
@@ -1906,9 +2014,43 @@ class MainWindow(QMainWindow):
             log_func=lambda msg: self._log(msg, "success"),
         )
         self.pipeline = PipelineScheduler([auth_stage, sandbox_stage, ai_stage, respond_stage])
+        self.chat_provider.currentIndexChanged.connect(self._on_chat_provider_changed)
         self.event_bus.set_pipeline(self.pipeline)
         self.bot_manager.set_event_bus(self.event_bus)
         self._log("事件总线 + 消息管道已初始化")
+
+    def _on_chat_provider_changed(self, idx: int):
+        self._log(f"[切换] 下拉框索引变化: {idx}, 文本: {self.chat_provider.currentText()}")
+        name = self.chat_provider.currentText() if idx > 0 else ""
+        if not name:
+            self._log("[切换] 已切换到默认模型")
+            return
+        found = False
+        for i in range(self.providers_list.count()):
+            item = self.providers_list.item(i)
+            if not item:
+                continue
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data and data.get("name") == name:
+                from ai.config import ProviderConfig
+                pc = ProviderConfig.from_dict(data)
+                self._log(f"[切换] 找到供应商: {pc.name} ({pc.model})")
+                self.ai_provider.setCurrentText(pc.provider)
+                self.ai_api_key.setText(pc.api_key)
+                self.ai_api_url.setText(pc.api_url)
+                self.ai_model.setText(pc.model)
+                self.ai_temp.setValue(int(pc.temperature * 100))
+                self.ai_max_tokens.setValue(pc.max_tokens)
+                # Update cached config
+                cfg = self._get_ai_config_from_ui()
+                cfg.active_provider = name
+                self._cached_ai_config = cfg
+                self._update_ai_chat_status()
+                self._log(f"[切换] 完成: {pc.name} ({pc.model})")
+                found = True
+                break
+        if not found:
+            self._log(f"[切换] 未找到供应商: {name}，供应商列表共 {self.providers_list.count()} 项")
 
     def _update_ai_chat_status(self):
         cfg = self._cached_ai_config
@@ -2058,8 +2200,9 @@ class MainWindow(QMainWindow):
             if idx >= 0: self.chat_provider.setCurrentIndex(idx)
 
     def _fetch_models(self):
-        if hasattr(self, '_fetch_cancel') and self._fetch_cancel and not self._fetch_cancel.is_set():
+        if getattr(self, '_fetch_cancel', None) is not None and not self._fetch_cancel.is_set():
             self._fetch_cancel.set()
+            self._fetch_cancel = None
             self.ai_btn_fetch_models.setText("获取模型列表")
             self._log("已取消获取模型")
             return
@@ -2072,7 +2215,15 @@ class MainWindow(QMainWindow):
 
         self._fetch_cancel = threading.Event()
         self.ai_btn_fetch_models.setText("取消")
+        self._log(f"正在获取模型列表: {api_url}/models")
         threading.Thread(target=self._do_fetch_models, args=(api_url, api_key), daemon=True).start()
+
+    COMMON_MODELS = {
+        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+        "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+        "google": ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
+        "anthropic": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
+    }
 
     def _do_fetch_models(self, api_url: str, api_key: str):
         import httpx
@@ -2081,20 +2232,30 @@ class MainWindow(QMainWindow):
             url = f"{api_url}/models"
             with httpx.Client(timeout=httpx.Timeout(15)) as client:
                 resp = client.get(url, headers={"Authorization": f"Bearer {api_key}"})
-            if cancel.is_set():
+            if cancel and cancel.is_set():
                 return
-            if resp.status_code != 200:
-                self.model_signal.fetch_error.emit(f"API 返回错误: {resp.status_code} {resp.text[:200]}")
-                return
-            data = resp.json()
-            models = [m["id"] for m in data.get("data", [])]
-            if not models:
-                self.model_signal.fetch_error.emit("未获取到模型，API 返回列表为空")
-                return
-            self.model_signal.models_ready.emit(models)
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [m["id"] for m in data.get("data", [])]
+                if models:
+                    self.model_signal.models_ready.emit(models)
+                    return
+            self.model_signal.fetch_error.emit(f"API 返回错误: {resp.status_code}")
+        except httpx.ConnectError:
+            if not cancel or not cancel.is_set():
+                self.model_signal.fetch_error.emit("无法连接 API 服务器，请检查网络和 API 地址")
+        except httpx.TimeoutException:
+            if not cancel or not cancel.is_set():
+                self.model_signal.fetch_error.emit("请求超时，请检查 API 地址是否正确")
         except Exception as e:
-            if not cancel.is_set():
-                self.model_signal.fetch_error.emit(f"获取失败: {e}")
+            if not cancel or not cancel.is_set():
+                err = str(e)
+                if "not support" in err or "image" in err.lower():
+                    self.model_signal.fetch_error.emit("该 API 不支持获取模型列表")
+                else:
+                    self.model_signal.fetch_error.emit(f"获取失败: {err[:100]}")
+        finally:
+            self._fetch_cancel = None
 
     def _show_model_picker(self, models: list):
         from PyQt6.QtWidgets import QDialog, QListWidget, QVBoxLayout, QDialogButtonBox, QComboBox
@@ -2127,18 +2288,23 @@ class MainWindow(QMainWindow):
                 lw.item(i).setHidden(text.lower() not in lw.item(i).text().lower())
         search.textChanged.connect(filter_models)
 
-        if dlg.exec() == QDialog.DialogCode.Accepted and lw.currentItem():
-            selected = lw.currentItem().text()
-            target_idx = target_cb.currentIndex()
-            if target_idx == 0:
-                self.ai_model.setText(selected)
-            elif target_idx == 1:
-                self.ai_vision_model.setText(selected)
-            elif target_idx == 2:
-                self.ai_img_model.setText(selected)
-            elif target_idx == 3:
-                self.ai_vid_model.setText(selected)
-            self._log(f"已选择模型 [{target_cb.currentText()}]: {selected}")
+        # Ensure list items are selectable
+        lw.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            selected_item = lw.currentItem()
+            if selected_item:
+                selected = selected_item.text()
+                target_idx = target_cb.currentIndex()
+                if target_idx == 0:
+                    self.ai_model.setText(selected)
+                elif target_idx == 1:
+                    self.ai_vision_model.setText(selected)
+                elif target_idx == 2:
+                    self.ai_img_model.setText(selected)
+                elif target_idx == 3:
+                    self.ai_vid_model.setText(selected)
+                self._log(f"已选择模型 [{target_cb.currentText()}]: {selected}")
         self.ai_btn_fetch_models.setText("获取模型列表")
 
     def _on_fetch_error(self, msg: str):
@@ -2283,7 +2449,7 @@ class MainWindow(QMainWindow):
             self.sub_list.takeItem(self.sub_list.row(item))
 
     def _add_provider_dialog(self):
-        dlg = QDialog(self); dlg.setWindowTitle("添加供应商"); dlg.setMinimumWidth(500)
+        dlg = QDialog(self); dlg.setWindowTitle("添加供应商"); dlg.setMinimumWidth(550)
         layout = QVBoxLayout(dlg)
         form = QFormLayout()
         name_edit = QLineEdit(); name_edit.setPlaceholderText("如: deepseek-pro")
@@ -2295,8 +2461,52 @@ class MainWindow(QMainWindow):
         form.addRow("API Key:", key_edit)
         url_edit = QLineEdit("https://api.openai.com/v1")
         form.addRow("API 地址:", url_edit)
+
+        model_row = QHBoxLayout()
         model_edit = QLineEdit("gpt-4o")
-        form.addRow("模型名:", model_edit)
+        model_row.addWidget(model_edit)
+        btn_fetch = QPushButton("获取模型")
+        btn_fetch.setStyleSheet(f"background:{C_PRIMARY};color:white;border:none;border-radius:4px;padding:4px 10px;")
+        model_row.addWidget(btn_fetch)
+        form.addRow("模型名:", model_row)
+
+        def do_fetch():
+            u = url_edit.text().strip().rstrip("/")
+            k = key_edit.text().strip()
+            if not u or not k:
+                return
+            import httpx
+            btn_fetch.setEnabled(False)
+            btn_fetch.setText("获取中...")
+            try:
+                resp = httpx.get(f"{u}/models", headers={"Authorization": f"Bearer {k}"}, timeout=15)
+                if resp.status_code == 200:
+                    models = [m["id"] for m in resp.json().get("data", [])]
+                    if models:
+                        from PyQt6.QtWidgets import QInputDialog
+                        m, ok = QInputDialog.getItem(dlg, "选择模型", "模型:", models, False)
+                        if ok and m:
+                            model_edit.setText(m)
+                    else:
+                        from PyQt6.QtWidgets import QMessageBox
+                        QMessageBox.information(dlg, "提示", "API 返回模型列表为空")
+                else:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.information(dlg, "提示", f"API 返回错误: HTTP {resp.status_code}")
+            except httpx.ConnectError:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(dlg, "提示", "连接失败，请检查网络和 API 地址")
+            except httpx.TimeoutException:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(dlg, "提示", "请求超时")
+            except Exception as e:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.information(dlg, "提示", f"错误: {str(e)[:50]}")
+            finally:
+                btn_fetch.setEnabled(True)
+                btn_fetch.setText("获取模型")
+        btn_fetch.clicked.connect(do_fetch)
+
         temp_spin = QSpinBox(); temp_spin.setRange(0,200); temp_spin.setValue(70)
         form.addRow("温度:", temp_spin)
         tokens_spin = QSpinBox(); tokens_spin.setRange(256, 128000); tokens_spin.setValue(4096); tokens_spin.setSingleStep(1024)
@@ -2604,6 +2814,7 @@ class MainWindow(QMainWindow):
             self._log("AI配置文件已加载")
 
         self._load_user_config()
+        self._load_bot_profiles()
 
     def _show_about(self):
         QMessageBox.about(self, "关于 SandboxQQ",
