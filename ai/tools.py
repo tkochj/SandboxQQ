@@ -34,9 +34,22 @@ class ExecutePythonTool(SandboxTool):
         sp = os.path.join(sandbox_root,"_sandbox_script.py")
         try:
             with open(sp,"w",encoding="utf-8") as f: f.write(code)
-            r = subprocess.run([sys.executable,sp],cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,env={**os.environ,"SANDBOX_ROOT":sandbox_root})
-            o = (r.stdout or "") + (("[STDERR]\n"+r.stderr) if r.stderr else "") + (("\n[退出码: "+str(r.returncode)+"]") if r.returncode else "")
-            return o.strip() or "(无输出)"
+            sm = getattr(self, '_sandbox_manager', None)
+            if sm and sm.proc_sandbox:
+                proc = sm.proc_sandbox.spawn([sys.executable, sp], cwd=sandbox_root, capture_output=True)
+                if not proc:
+                    return "错误: 沙盒拒绝执行"
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                    rcode = proc.returncode
+                except subprocess.TimeoutExpired:
+                    sm.proc_sandbox.kill(proc.pid)
+                    return f"错误: 超时({timeout}秒)"
+                out = (stdout or "") + (("[STDERR]\n"+stderr) if stderr else "") + (("\n[退出码: "+str(rcode)+"]") if rcode else "")
+            else:
+                r = subprocess.run([sys.executable,sp],cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,env={**os.environ,"SANDBOX_ROOT":sandbox_root})
+                out = (r.stdout or "") + (("[STDERR]\n"+r.stderr) if r.stderr else "") + (("\n[退出码: "+str(r.returncode)+"]") if r.returncode else "")
+            return out.strip() or "(无输出)"
         except subprocess.TimeoutExpired: return f"错误: 超时({timeout}秒)"
         except Exception as e: return f"执行错误: {e}"
         finally:
@@ -98,20 +111,39 @@ class ListFilesTool(SandboxTool):
             return f"目录: {rp or '/'} ({len(entries)}项)\n"+"\n".join(entries) if entries else "(空目录)"
         except Exception as e: return f"列出失败: {e}"
 
+ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl","wget","python","pip","npm","node","git"]
+
 class RunShellTool(SandboxTool):
     name = "run_shell"; display_name = "Shell命令"
-    description = "在沙盒目录内执行shell命令。危险命令自动拦截。"
+    description = "在沙盒目录内执行shell命令。只允许安全的只读命令。"
     permission_key = "run_shell"
     parameters = {"type":"object","properties":{"command":{"type":"string","description":"shell命令"},"timeout":{"type":"integer","description":"超时秒数","default":30}},"required":["command"]}
 
     async def run(self, sandbox_root: str, **kwargs) -> str:
         cmd = kwargs.get("command",""); timeout = kwargs.get("timeout",30)
         if not cmd.strip(): return "错误: 命令不能为空"
-        for d in ["format","del /f","rd /s","rmdir /s","shutdown","taskkill"]:
-            if d in cmd.lower(): return f"错误: 危险命令被拦截: {d}"
+        base = cmd.strip().split()[0].lower()
+        if base not in ALLOWED_SHELL_COMMANDS:
+            return f"错误: 命令 '{base}' 不在白名单中。允许: {', '.join(ALLOWED_SHELL_COMMANDS)}"
+        dangerous_patterns = ["&&","||","|",";","`","$(",">",">>","<"]
+        for p in dangerous_patterns:
+            if p in cmd:
+                return f"错误: 命令包含危险符号 '{p}'"
         try:
-            r = subprocess.run(cmd,cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,shell=True)
-            o = (r.stdout or "") + ("\n[STDERR]\n"+r.stderr[:2000] if r.stderr else "")
+            sm = getattr(self, '_sandbox_manager', None)
+            if sm and sm.proc_sandbox:
+                proc = sm.proc_sandbox.spawn(cmd, cwd=sandbox_root, capture_output=True, shell=True)
+                if not proc:
+                    return "错误: 沙盒拒绝执行"
+                try:
+                    stdout, stderr = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    sm.proc_sandbox.kill(proc.pid)
+                    return f"错误: 超时({timeout}秒)"
+                o = (stdout or "") + ("\n[STDERR]\n"+stderr[:2000] if stderr else "")
+            else:
+                r = subprocess.run(cmd,cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,shell=True)
+                o = (r.stdout or "") + ("\n[STDERR]\n"+r.stderr[:2000] if r.stderr else "")
             if len(o)>5000: o = o[:5000]+"\n...(截断)"
             return o.strip() or "(无输出)"
         except subprocess.TimeoutExpired: return f"错误: 超时({timeout}秒)"
@@ -577,9 +609,10 @@ def get_tool_by_name(name: str) -> Optional[SandboxTool]:
         if t.name == name: return t
     return None
 
-def set_tool_config(config):
+def set_tool_config(config, sandbox_manager=None):
     for t in TOOL_REGISTRY:
         t.config = config
+        t._sandbox_manager = sandbox_manager
 
 def _resolve(sandbox_root: str, rel_path: str) -> Optional[str]:
     root = Path(sandbox_root).resolve()

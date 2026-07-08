@@ -46,10 +46,11 @@ class ProcessSandbox:
 
     def spawn(
         self,
-        cmd: List[str],
+        cmd,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         capture_output: bool = True,
+        shell: bool = False,
     ) -> Optional[subprocess.Popen]:
         work_dir = cwd or (str(self.sandbox_root) if self.sandbox_root else None)
 
@@ -63,28 +64,56 @@ class ProcessSandbox:
         if self.sandbox_root:
             process_env["SANDBOX_ROOT"] = str(self.sandbox_root)
 
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=work_dir,
-                env=process_env,
-                stdout=subprocess.PIPE if capture_output else None,
-                stderr=subprocess.PIPE if capture_output else None,
-            )
+        proc = None
+        if self.restricted_token and HAS_PYWIN32:
+            try:
+                import win32process, win32security, win32api
+                cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
+                h_process = win32process.CreateProcessAsUser(
+                    self.restricted_token,
+                    None,
+                    cmd_line,
+                    None, None, False,
+                    win32process.CREATE_SUSPENDED | win32process.CREATE_NEW_CONSOLE,
+                    process_env,
+                    work_dir,
+                    win32process.STARTUPINFO(),
+                )
+                proc_handle, thread_handle, pid, tid = h_process
+                win32process.ResumeThread(thread_handle)
+                proc = subprocess.Popen(pid=pid)
+                proc.stdout = None
+                proc.stderr = None
+                logger.info(f"Spawned with restricted token: PID {pid}")
+            except Exception as e:
+                logger.warning(f"Restricted token failed, fallback: {e}")
 
-            if self.job_manager:
+        if not proc:
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=work_dir,
+                    env=process_env,
+                    stdout=subprocess.PIPE if capture_output else None,
+                    stderr=subprocess.PIPE if capture_output else None,
+                    shell=shell,
+                )
+            except Exception as e:
+                logger.error(f"Failed to spawn process: {e}")
+                return None
+
+        if self.job_manager:
+            try:
                 self.job_manager.assign_process(proc.pid)
+            except Exception as e:
+                logger.warning(f"Failed to assign job: {e}")
 
-            sp = SandboxedProcess(proc.pid, cmd[0] if cmd else "", " ".join(cmd))
-            with self._lock:
-                self._processes[proc.pid] = sp
+        sp = SandboxedProcess(proc.pid, cmd[0] if isinstance(cmd, list) else cmd, str(cmd))
+        with self._lock:
+            self._processes[proc.pid] = sp
 
-            logger.info(f"Spawned sandboxed process: {cmd[0]} (PID: {proc.pid})")
-            return proc
-
-        except Exception as e:
-            logger.error(f"Failed to spawn sandboxed process: {e}")
-            return None
+        logger.info(f"Spawned sandboxed process: {sp.name} (PID: {proc.pid})")
+        return proc
 
     def spawn_python(
         self,
