@@ -53,6 +53,9 @@ class PluginManager:
 
     def _load_plugin(self, path: Path):
         try:
+            # 安全警告: 插件在主进程中 importlib 加载执行，完全绕过沙箱隔离。
+            # 只应加载受信任的插件。未来版本将支持 subprocess 隔离。
+            logger.warning(f"插件 {path.name} 将在主进程加载（无沙箱隔离），请确保来源可信")
             spec = importlib.util.spec_from_file_location(f"plugin_{path.stem}", path)
             if not spec or not spec.loader:
                 return

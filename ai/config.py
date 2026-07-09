@@ -248,7 +248,24 @@ class AIConfig:
 
     @classmethod
     def load(cls, path: str):
-        if not path or not os.path.exists(path):
-            return cls()
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_dict(json.load(f))
+        cfg = cls()
+        if path and os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = cls.from_dict(json.load(f))
+        # 环境变量覆盖: AI_API_KEY, AI_API_URL, AI_MODEL, AI_VISION_API_KEY 等
+        env_overrides = {
+            "api_key": "AI_API_KEY",
+            "api_url": "AI_API_URL",
+            "model": "AI_MODEL",
+            "vision_api_key": "AI_VISION_API_KEY",
+            "vision_api_url": "AI_VISION_API_URL",
+            "image_gen_api_key": "AI_IMAGE_GEN_API_KEY",
+            "image_gen_api_url": "AI_IMAGE_GEN_API_URL",
+            "video_gen_api_key": "AI_VIDEO_GEN_API_KEY",
+            "video_gen_api_url": "AI_VIDEO_GEN_API_URL",
+        }
+        for attr, env_name in env_overrides.items():
+            val = os.environ.get(env_name)
+            if val:
+                setattr(cfg, attr, val)
+        return cfg

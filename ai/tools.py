@@ -47,7 +47,8 @@ class ExecutePythonTool(SandboxTool):
                     return f"错误: 超时({timeout}秒)"
                 out = (stdout or "") + (("[STDERR]\n"+stderr) if stderr else "") + (("\n[退出码: "+str(rcode)+"]") if rcode else "")
             else:
-                r = subprocess.run([sys.executable,sp],cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,env={**os.environ,"SANDBOX_ROOT":sandbox_root})
+                safe_env = {"PATH": os.environ.get("PATH", ""), "SANDBOX_ROOT": sandbox_root}
+                r = subprocess.run([sys.executable,sp],cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,env=safe_env)
                 out = (r.stdout or "") + (("[STDERR]\n"+r.stderr) if r.stderr else "") + (("\n[退出码: "+str(r.returncode)+"]") if r.returncode else "")
             return out.strip() or "(无输出)"
         except subprocess.TimeoutExpired: return f"错误: 超时({timeout}秒)"
@@ -122,17 +123,20 @@ class RunShellTool(SandboxTool):
     async def run(self, sandbox_root: str, **kwargs) -> str:
         cmd = kwargs.get("command",""); timeout = kwargs.get("timeout",30)
         if not cmd.strip(): return "错误: 命令不能为空"
-        base = cmd.strip().split()[0].lower()
+        import shlex
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            return f"错误: 命令解析失败: {e}"
+        if not parts:
+            return "错误: 命令为空"
+        base = parts[0].lower()
         if base not in ALLOWED_SHELL_COMMANDS:
             return f"错误: 命令 '{base}' 不在白名单中。允许: {', '.join(ALLOWED_SHELL_COMMANDS)}"
-        dangerous_patterns = ["&&","||","|",";","`","$(",">",">>","<"]
-        for p in dangerous_patterns:
-            if p in cmd:
-                return f"错误: 命令包含危险符号 '{p}'"
         try:
             sm = getattr(self, '_sandbox_manager', None)
             if sm and sm.proc_sandbox:
-                proc = sm.proc_sandbox.spawn(cmd, cwd=sandbox_root, capture_output=True, shell=True)
+                proc = sm.proc_sandbox.spawn(parts, cwd=sandbox_root, capture_output=True, shell=False)
                 if not proc:
                     return "错误: 沙盒拒绝执行"
                 try:
@@ -142,7 +146,7 @@ class RunShellTool(SandboxTool):
                     return f"错误: 超时({timeout}秒)"
                 o = (stdout or "") + ("\n[STDERR]\n"+stderr[:2000] if stderr else "")
             else:
-                r = subprocess.run(cmd,cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,shell=True)
+                r = subprocess.run(parts,cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,shell=False)
                 o = (r.stdout or "") + ("\n[STDERR]\n"+r.stderr[:2000] if r.stderr else "")
             if len(o)>5000: o = o[:5000]+"\n...(截断)"
             return o.strip() or "(无输出)"

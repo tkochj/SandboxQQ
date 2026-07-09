@@ -15,7 +15,15 @@ PROXY_PORT_RANGE = (23100, 23199)
 
 class ProxySandbox:
     def __init__(self, allowed_hosts: Optional[list] = None):
-        self.allowed_hosts = [h.lower() for h in (allowed_hosts or [])]
+        raw = allowed_hosts or []
+        normalized = []
+        for h in raw:
+            h = h.lower().strip()
+            from urllib.parse import urlparse
+            if "://" in h:
+                h = urlparse(h).hostname or h
+            normalized.append(h)
+        self.allowed_hosts = normalized
         self._server: Optional[asyncio.AbstractServer] = None
         self._port: int = 0
 

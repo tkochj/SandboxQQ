@@ -24,15 +24,31 @@ class ConversationMemory:
         self._context_window = context_window
         self._context_mode = context_mode
 
+    _SECRET_PATTERNS = [
+        ('"api_key":\\s*"[\\w\\-]+"', '"api_key": "**REDACTED**"'),
+        ('"app_secret":\\s*"[^"]+"', '"app_secret": "**REDACTED**"'),
+        ('"bot_token":\\s*"[^"]+"', '"bot_token": "**REDACTED**"'),
+        ('"token":\\s*"[^"]+"', '"token": "**REDACTED**"'),
+        ('"secret":\\s*"[^"]+"', '"secret": "**REDACTED**"'),
+        ('github_pat_[\\w\\-]+', 'github_pat_**REDACTED**'),
+        ('ghp_[\\w\\-]+', 'ghp_**REDACTED**'),
+        ('sk-[\\w\\-]{10,}', 'sk-**REDACTED**'),
+        ('Bearer\\s+[\\w\\-\\.]+', 'Bearer **REDACTED**'),
+    ]
+
     def add_message(self, channel_id: str, role: str, content: str):
         if not channel_id:
             return
+        import re
+        safe = content
+        for pattern, replacement in self._SECRET_PATTERNS:
+            safe = re.sub(pattern, replacement, safe)
         with self._lock:
             if channel_id not in self._histories:
                 self._histories[channel_id] = []
             self._histories[channel_id].append({
                 "role": role,
-                "content": content,
+                "content": safe,
                 "time": time.time(),
             })
             self._dirty = True
