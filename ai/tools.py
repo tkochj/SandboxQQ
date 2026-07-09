@@ -215,7 +215,7 @@ class GenerateImageTool(SandboxTool):
 
 class AnalyzeImageTool(SandboxTool):
     name = "analyze_image"; display_name = "分析图片"
-    description = "使用AI分析图片内容。读取沙盒内的图片文件并返回描述。"
+    description = "分析沙盒中的图片文件内容。当用户问图片里有什么、要求描述图片、或需要理解图片内容时，必须调用此工具。先确认图片文件路径（通常在沙盒根目录或 outputs/ 下），然后传入路径分析。"
     permission_key = "read_file"
     parameters = {"type":"object","properties":{"image_path":{"type":"string","description":"图片路径(相对沙盒根目录)"},"question":{"type":"string","description":"关于图片的问题","default":"请描述这张图片"}},"required":["image_path"]}
     config = None

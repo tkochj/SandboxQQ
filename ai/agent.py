@@ -38,7 +38,7 @@ class AIAgent:
     def add_system_prompt(self):
         prompt = self.config.system_prompt
         if self.config.vision_api_key or self.config.api_key:
-            prompt += "\n\n## 图片识别能力\n你可以用 analyze_image 工具分析沙盒目录内的图片文件。"
+            prompt += "\n\n## 图片识别能力\n如果用户问图片内容、描述图片、或理解图片含义，你必须先调用 analyze_image 工具分析沙盒中的图片文件，再回答用户。不要假装看到图片内容。"
         if self.config.image_gen_api_key:
             prompt += "\n\n## 图片生成能力\n你可以用 generate_image 工具根据文字描述生成图片。"
         if self.config.video_gen_api_key:

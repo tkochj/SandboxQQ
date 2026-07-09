@@ -165,6 +165,8 @@ class AIResponseStage(Stage):
             system += "\n\n## 可用专业技能\n你可以根据任务需要激活以下技能：\n"
             for s in enabled_skills:
                 system += f"\n### {s.name}: {s.description}\n{s.system_prompt}\n"
+        if config.vision_api_key or config.api_key:
+            system += "\n\n## 图片识别能力\n如果用户问图片内容、描述图片、或理解图片含义，你必须先调用 analyze_image 工具分析沙盒中的图片文件，再回答用户。不要假装看到图片内容。\n"
         if config.enable_thinking and config.thinking_model:
             system += "\n\n## 深度思考\n对于复杂问题，你可以先调用深度思考模型分析，再给出最终答案。\n"
             system += f"思考模型: {config.thinking_model}\n"
