@@ -30,8 +30,7 @@ class ConversationMemory:
         ('"bot_token":\\s*"[^"]+"', '"bot_token": "**REDACTED**"'),
         ('"token":\\s*"[^"]+"', '"token": "**REDACTED**"'),
         ('"secret":\\s*"[^"]+"', '"secret": "**REDACTED**"'),
-        ('github_pat_[\\w\\-]+', 'github_pat_**REDACTED**'),
-        ('ghp_[\\w\\-]+', 'ghp_**REDACTED**'),
+        ('gh\\w+_\\w+_[\\w\\-]{10,}', 'gh**_REDACTED**'),
         ('sk-[\\w\\-]{10,}', 'sk-**REDACTED**'),
         ('Bearer\\s+[\\w\\-\\.]+', 'Bearer **REDACTED**'),
     ]
