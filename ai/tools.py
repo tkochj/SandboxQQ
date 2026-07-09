@@ -54,9 +54,14 @@ class ExecutePythonTool(SandboxTool):
             try: os.remove(sp)
             except Exception: pass
 
+_SENSITIVE_FILES = {
+    "ai_config.json", "bot_config.json", "bot_profiles.json",
+    "conversation_memory.json", "user_config.json",
+}
+
 class ReadFileTool(SandboxTool):
     name = "read_file"; display_name = "读取文件"
-    description = "读取沙盒目录内的文件。路径相对于沙盒根目录。"
+    description = "读取沙盒目录内的文件。路径相对于沙盒根目录。不允许读取配置文件。"
     permission_key = "read_file"
     parameters = {"type":"object","properties":{"path":{"type":"string","description":"文件路径(相对沙盒根目录)"},"encoding":{"type":"string","description":"编码","default":"utf-8"}},"required":["path"]}
 
@@ -65,15 +70,20 @@ class ReadFileTool(SandboxTool):
         ap = _resolve(sandbox_root, rp)
         if not ap: return f"错误: 路径超出沙盒: {rp}"
         if not os.path.isfile(ap): return f"错误: 文件不存在: {rp}"
+        if os.path.basename(ap) in _SENSITIVE_FILES:
+            return f"错误: 不允许读取配置文件: {rp}"
         try:
             with open(ap,"r",encoding=enc) as f: c = f.read()
             if len(c)>10000: return f"(文件{os.path.getsize(ap)}bytes,显示前10000)\n{c[:10000]}"
             return c
         except Exception as e: return f"读取失败: {e}"
 
+_WRITE_BLOCKED_FILES = {"ai_config.json", "bot_config.json", "bot_profiles.json", "conversation_memory.json"}
+_WRITE_BLOCKED_EXT = (".py", ".exe", ".bat", ".ps1", ".dll", ".com", ".vbs", ".js")
+
 class WriteFileTool(SandboxTool):
     name = "write_file"; display_name = "写入文件"
-    description = "写入文件到沙盒目录。路径相对于沙盒根目录，自动创建子目录。"
+    description = "写入文件到沙盒目录。路径相对于沙盒根目录，自动创建子目录。不允许写入可执行文件。"
     permission_key = "write_file"
     parameters = {"type":"object","properties":{"path":{"type":"string","description":"文件路径(相对沙盒根目录)"},"content":{"type":"string","description":"文件内容"}},"required":["path","content"]}
 
@@ -81,6 +91,15 @@ class WriteFileTool(SandboxTool):
         rp = kwargs.get("path",""); content = kwargs.get("content","")
         ap = _resolve(sandbox_root, rp)
         if not ap: return f"错误: 路径超出沙盒: {rp}"
+        fname = os.path.basename(ap)
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in _WRITE_BLOCKED_EXT:
+            return f"错误: 不允许写入可执行文件: {rp}"
+        if fname in _WRITE_BLOCKED_FILES:
+            return f"错误: 不允许覆盖配置文件: {rp}"
+        rp_normalized = rp.replace("\\", "/")
+        if "/plugins/" in rp_normalized or rp_normalized.startswith("plugins/"):
+            return f"错误: 不允许写入插件目录: {rp}"
         try:
             os.makedirs(os.path.dirname(ap), exist_ok=True)
             with open(ap,"w",encoding="utf-8") as f: f.write(content)

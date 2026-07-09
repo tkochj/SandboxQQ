@@ -12,3 +12,6 @@ bot_config.json
 bot_profiles.json
 sandbox_config.json
 user_config.json
+
+# Embedded clone
+SandboxQQ/

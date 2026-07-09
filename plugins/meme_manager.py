@@ -107,7 +107,12 @@ class Plugin:
         elif cmd == "save" and len(parts) >= 4:
             cat = parts[2]
             fname = parts[3]
-            src = Path(MEMES_DIR).parent.parent / fname
+            sandbox_root = Path(__file__).resolve().parent.parent
+            src = (sandbox_root / fname).resolve()
+            try:
+                src.relative_to(sandbox_root)
+            except ValueError:
+                return "错误: 路径超出沙盒目录"
             if src.is_file():
                 dst = MEMES_DIR / f"{cat}_{len(self.memes.get(cat,[]))}_{src.name}"
                 shutil.copy2(src, dst)

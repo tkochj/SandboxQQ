@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent / "plugins"
 
+# Only plugins listed here can be loaded. Others are silently ignored.
+_TRUSTED_PLUGINS = {"meme_manager"}
+
 
 class PluginBase:
     name: str = ""
@@ -46,6 +49,9 @@ class PluginManager:
         PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
         for f in sorted(PLUGIN_DIR.glob("*.py")):
             if f.name.startswith("_"):
+                continue
+            if f.stem not in _TRUSTED_PLUGINS:
+                logger.warning(f"插件 {f.name} 不在信任列表，跳过加载")
                 continue
             self._load_plugin(f)
         self._loaded = True
