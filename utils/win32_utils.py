@@ -210,7 +210,7 @@ class TokenManager:
 
     @staticmethod
     def get_container_sandbox(sandbox_root: str):
-        """Public entry point: ensure AppContainer profile + ACL, return (sid_ptr, appcontainer_token)."""
+        """Public entry point: ensure AppContainer profile + ACL, return PSID pointer."""
         if not HAS_PYWIN32:
             logger.warning("pywin32 missing, cannot create AppContainer token")
             return None
@@ -225,6 +225,19 @@ class TokenManager:
         except Exception as e:
             logger.warning(f"Failed to create AppContainer: {e}")
             return None
+
+    @staticmethod
+    def get_appcontainer_sid_string() -> str:
+        """Return the AppContainer SID as a string (e.g. 'S-1-15-2-...'), or empty."""
+        try:
+            import win32security
+            sid_ptr = TokenManager._get_appcontainer_sid()
+            if not sid_ptr:
+                return ""
+            return win32security.ConvertSidToStringSid(sid_ptr)
+        except Exception as e:
+            logger.warning(f"Cannot get AppContainer SID string: {e}")
+            return ""
 
     @staticmethod
     def create_restricted_token():

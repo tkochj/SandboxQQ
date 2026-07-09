@@ -9,12 +9,24 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from utils.win32_utils import JobObjectManager, TokenManager, HAS_PYWIN32
-from sandbox.filesystem import FileSystemSandbox
 from sandbox.network import NetworkSandbox
 from sandbox.process import ProcessSandbox
 from sandbox.proxy import ProxySandbox
 
 logger = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    from sandbox.filesystem import FileSystemSandbox
+else:
+    # Linux/macOS 不使用文件系统沙盒（AppContainer 不可用）
+    class FileSystemSandbox:
+        def __init__(self, *a, **kw): self._stats = {"blocked_count": 0, "redirected_count": 0}
+        def activate(self): pass
+        def deactivate(self): pass
+        def resolve_path(self, p): return p
+        def get_stats(self): return {}
+        def list_sandbox_files(self, r=True): return []
+        def add_allowed_write_dir(self, p): pass
 
 
 class SandboxConfig:
@@ -138,6 +150,13 @@ class SandboxManager:
             if self.state in (SandboxState.RUNNING, SandboxState.STARTING):
                 logger.warning("Sandbox is already running")
                 return False
+
+            if sys.platform != "win32":
+                logger.warning(
+                    "SandboxQQ 沙盒隔离当前仅支持 Windows (AppContainer + Windows Firewall)。"
+                    "Linux/macOS 下进程隔离依赖 Docker（需自行安装），网络/文件隔离不可用。"
+                )
+
             self._set_state(SandboxState.STARTING)
             self.config.root_dir = root_dir
 
@@ -145,6 +164,7 @@ class SandboxManager:
                 root_path = Path(root_dir).resolve()
                 root_path.mkdir(parents=True, exist_ok=True)
 
+                # ── 进程隔离 ──
                 if self.config.enable_process_isolation:
                     if self.job_manager:
                         self.job_manager.close()
@@ -164,42 +184,46 @@ class SandboxManager:
                         root_dir,
                         self.config.active_process_limit,
                     )
-
                     self.stats["total_processes"] = 0
 
-                if self.config.enable_file_isolation:
-                    self.fs_sandbox = FileSystemSandbox(root_dir, self.config.blocked_dirs)
-                    self.fs_sandbox.activate()
+                # ── 获取 AppContainer SID 字符串（供防火墙使用）──
+                appcontainer_sid_str = ""
+                if HAS_PYWIN32:
+                    try:
+                        appcontainer_sid_str = TokenManager.get_appcontainer_sid_string()
+                    except Exception:
+                        pass
 
-                if self.config.enable_network_isolation:
-                    if self.config.allowed_hosts:
-                        self.net_sandbox = NetworkSandbox(
-                            root_dir,
+                # ── 网络隔离 ──
+                if self.config.enable_network_isolation and self.config.allowed_hosts:
+                    self.net_sandbox = NetworkSandbox(
+                        root_dir,
+                        allowed_hosts=self.config.allowed_hosts,
+                        appcontainer_sid_str=appcontainer_sid_str,
+                    )
+                    self.net_sandbox.activate()
+
+                    # Start proxy
+                    try:
+                        self.proxy_sandbox = ProxySandbox(
                             allowed_hosts=self.config.allowed_hosts,
                         )
-                        self.net_sandbox.activate()
-                    # Start proxy in a background thread, only for subprocesses
-                    if self.config.allowed_hosts:
-                        try:
-                            self.proxy_sandbox = ProxySandbox(
-                                allowed_hosts=self.config.allowed_hosts,
-                            )
-                            import asyncio, threading
-                            proxy_loop = asyncio.new_event_loop()
-                            proxy_thread = threading.Thread(
-                                target=lambda: proxy_loop.run_until_complete(
-                                    self.proxy_sandbox.start()
-                                ),
-                                daemon=True,
-                            )
-                            proxy_thread.start()
-                            import time
-                            time.sleep(0.2)
-                            if self.proxy_sandbox.proxy_url and self.proc_sandbox:
-                                self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
-                                logger.info(f"Subprocess proxy: {self.proxy_sandbox.proxy_url}")
-                        except Exception as e:
-                            logger.warning(f"Proxy init failed (non-fatal): {e}")
+                        import asyncio, threading
+                        proxy_loop = asyncio.new_event_loop()
+                        proxy_thread = threading.Thread(
+                            target=lambda: proxy_loop.run_until_complete(
+                                self.proxy_sandbox.start()
+                            ),
+                            daemon=True,
+                        )
+                        proxy_thread.start()
+                        import time
+                        time.sleep(0.2)
+                        if self.proxy_sandbox.proxy_url and self.proc_sandbox:
+                            self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
+                            logger.info(f"Subprocess proxy: {self.proxy_sandbox.proxy_url}")
+                    except Exception as e:
+                        logger.warning(f"Proxy init failed (non-fatal): {e}")
 
                 self.stats["uptime"] = time.time()
                 self._start_monitor()
@@ -229,8 +253,6 @@ class SandboxManager:
                 asyncio.run(self.proxy_sandbox.stop())
             except Exception:
                 pass
-        if self.fs_sandbox:
-            self.fs_sandbox.deactivate()
         if self.proc_sandbox:
             self.proc_sandbox.cleanup()
         if self.job_manager:
