@@ -178,10 +178,10 @@ class ProcessSandbox:
                     if not kernel32.InitializeProcThreadAttributeList(attr_list, 1, 0, ctypes.byref(attr_list_size)):
                         raise ctypes.WinError(ctypes.get_last_error())
 
+                    # SECURITY_CAPABILITIES: PSID(8) + PSID_AND_ATTRIBUTES*(8) + DWORD(4) + DWORD(4) = 24
                     sec_caps = (ctypes.c_ubyte * 24)()
                     ctypes.memset(sec_caps, 0, 24)
-                    ctypes.memmove(sec_caps, ctypes.byref(wintypes.DWORD(1)), 4)
-                    ctypes.memmove(ctypes.byref(sec_caps, 4), ctypes.byref(wintypes.PSID(self._appcontainer_sid)), 8)
+                    ctypes.memmove(sec_caps, ctypes.byref(wintypes.PSID(self._appcontainer_sid)), 8)
 
                     if not kernel32.UpdateProcThreadAttribute(
                         attr_list, 0, 0x20007, ctypes.byref(sec_caps), ctypes.sizeof(sec_caps), None, None,
@@ -192,11 +192,14 @@ class ProcessSandbox:
                     si.StartupInfo.cb = ctypes.sizeof(type(si))
                     si.lpAttributeList = attr_list
                     cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
+                    # Convert env dict to null-terminated environment block
+                    env_block = "\0".join(f"{k}={v}" for k, v in process_env.items()) + "\0\0"
+                    env_ptr = ctypes.create_unicode_buffer(env_block)
                     pi = ctypes.create_string_buffer(24)
                     if not kernel32.CreateProcessW(
                         None, cmd_line, None, None, False,
-                        0x08000000 | 0x00000004 | 0x00000010,
-                        process_env, work_dir, ctypes.byref(si), pi,
+                        0x08000000 | 0x00000004,  # CREATE_NO_WINDOW | CREATE_SUSPENDED
+                        env_ptr, work_dir, ctypes.byref(si), pi,
                     ):
                         raise ctypes.WinError(ctypes.get_last_error())
 
