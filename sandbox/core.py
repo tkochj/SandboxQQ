@@ -71,6 +71,8 @@ class SandboxConfig:
         for h in [
             "api.sgroup.qq.com", "api.qq.com", "bots.qq.com",
             "wss://api.sgroup.qq.com", "wss://api.qq.com",
+            "api.openai.com", "api.deepseek.com", "api.anthropic.com",
+            "open.bigmodel.cn", "dashscope.aliyuncs.com",
         ]:
             if h not in config.allowed_hosts:
                 config.allowed_hosts.append(h)

@@ -85,7 +85,7 @@ class ProxySandbox:
                         break
                 try:
                     remote_reader, remote_writer = await asyncio.wait_for(
-                        asyncio.open_connection(host, port.rsplit(":", 1)[1] if ":" in host_port else 443),
+                        asyncio.open_connection(host, host_port.rsplit(":", 1)[1] if ":" in host_port else 443),
                         timeout=10,
                     )
                 except Exception as e:
