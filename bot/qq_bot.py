@@ -27,6 +27,7 @@ class BotProtocol(Enum):
 
 @dataclass
 class BotConfig:
+    name: str = ""
     protocol: BotProtocol = BotProtocol.QQ_OFFICIAL
     app_id: str = ""
     app_secret: str = ""
@@ -67,6 +68,7 @@ class BotConfig:
 
     def to_dict(self):
         return {
+            "name": self.name,
             "protocol": self.protocol.value,
             "app_id": self.app_id,
             "app_secret": self.app_secret,
@@ -85,6 +87,7 @@ class BotConfig:
     @classmethod
     def from_dict(cls, data: dict):
         config = cls()
+        config.name = data.get("name", data.get("app_id", "")[:8])
         config.protocol = BotProtocol(data.get("protocol", BotProtocol.QQ_OFFICIAL.value))
         config.app_id = data.get("app_id", "")
         config.app_secret = data.get("app_secret", "")
@@ -122,6 +125,17 @@ class _BotpyClient(botpy.Client):
     async def on_group_at_message_create(self, message: GroupMessage):
         self._platform._handle_botpy_msg(message, "GROUP_AT_MESSAGE_CREATE")
 
+    async def on_group_message_create(self, message: GroupMessage):
+        # Catch-all for group messages — QQ API may skip on_group_at_message_create
+        # when multiple users are @'d alongside the bot.
+        app_id = self._platform.config.app_id
+        if not app_id:
+            return
+        # Check various @ mention formats used by QQ API
+        content = message.content or ""
+        if app_id in content or f"<@!{app_id}>" in content:
+            self._platform._handle_botpy_msg(message, "GROUP_AT_MESSAGE_CREATE")
+
     async def on_c2c_message_create(self, message: C2CMessage):
         self._platform._handle_botpy_msg(message, "C2C_MESSAGE_CREATE")
 
@@ -137,6 +151,10 @@ class QQOfficialPlatform(Platform):
 
     def is_running(self) -> bool:
         return self._running and self._ws_connected
+
+    @property
+    def bot_id(self) -> str:
+        return self.config.app_id
 
     def _handle_botpy_msg(self, msg, event_type: str):
         author = getattr(msg, "author", None)
@@ -155,6 +173,7 @@ class QQOfficialPlatform(Platform):
         attachments = getattr(msg, "attachments", []) or []
 
         event = MessageEvent(
+            bot_id=self.bot_id,
             platform_name="qq_official",
             message_id=str(msg_id) if msg_id else "",
             sender_id=sender_id,

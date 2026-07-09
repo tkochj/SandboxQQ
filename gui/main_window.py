@@ -423,6 +423,7 @@ class MainWindow(QMainWindow):
 
         self.sandbox = SandboxManager()
         self.bot_manager = BotManager()
+        self.bot_instances: list[dict] = []
         self.ai_config = AIConfig()
         self._manual_url_edit = False
         self.chat_session: Optional[ChatSession] = None
@@ -1135,75 +1136,57 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(header)
 
-        # 连接状态面板
-        status_box = QGroupBox("连接状态")
-        status_layout = QHBoxLayout(status_box)
+        # 多机器人实例管理
+        instance_box = QGroupBox("机器人实例")
+        instance_layout = QVBoxLayout(instance_box)
 
-        self.bot_indicator = QLabel("●")
-        self.bot_indicator.setStyleSheet(f"font-size: 32px; color: {C_DANGER};")
-        status_layout.addWidget(self.bot_indicator)
+        instance_top = QHBoxLayout()
+        instance_top.addWidget(QLabel("同时运行多个 QQ 机器人："))
+        instance_top.addStretch()
+        self.bot_add_btn = IconButton("＋ 添加机器人", "➕", "outline")
+        self.bot_add_btn.clicked.connect(self._add_bot_instance)
+        instance_top.addWidget(self.bot_add_btn)
+        self.bot_del_btn = IconButton("删除选中", "🗑", "danger")
+        self.bot_del_btn.clicked.connect(self._del_bot_instance)
+        instance_top.addWidget(self.bot_del_btn)
+        self.bot_start_all_btn = IconButton("全部启动", "▶", "success")
+        self.bot_start_all_btn.clicked.connect(self._start_all_bots)
+        instance_top.addWidget(self.bot_start_all_btn)
+        self.bot_stop_all_btn = IconButton("全部停止", "⏹", "danger")
+        self.bot_stop_all_btn.clicked.connect(self._stop_all_bots)
+        instance_top.addWidget(self.bot_stop_all_btn)
+        instance_layout.addLayout(instance_top)
 
-        status_text_col = QVBoxLayout()
-        self.bot_status_title = QLabel("未连接")
-        self.bot_status_title.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {C_TEXT};")
-        status_text_col.addWidget(self.bot_status_title)
-        self.bot_status_detail = QLabel("请配置下方参数后点击连接")
-        self.bot_status_detail.setStyleSheet(f"font-size: 12px; color: {C_TEXT_DIM};")
-        status_text_col.addWidget(self.bot_status_detail)
-        status_layout.addLayout(status_text_col)
-        status_layout.addStretch()
-
-        self.bot_btn_connect = IconButton("连接机器人", "🔌", "success")
-        self.bot_btn_connect.clicked.connect(self._toggle_bot)
-        status_layout.addWidget(self.bot_btn_connect)
-
-        self.bot_btn_disconnect = IconButton("断开连接", "🔌", "danger")
-        self.bot_btn_disconnect.clicked.connect(self._stop_bot)
-        self.bot_btn_disconnect.setEnabled(False)
-        status_layout.addWidget(self.bot_btn_disconnect)
-
-        layout.addWidget(status_box)
-
-        # Bot profile management (graphical)
-        profile_box = QGroupBox("机器人配置管理")
-        profile_layout = QVBoxLayout(profile_box)
-        profile_top = QHBoxLayout()
-        profile_top.addWidget(QLabel("保存的配置:"))
-        profile_top.addStretch()
-        self.bot_profile_add = IconButton("＋ 添加", "➕", "outline")
-        self.bot_profile_add.clicked.connect(self._add_bot_profile)
-        profile_top.addWidget(self.bot_profile_add)
-        self.bot_profile_del = IconButton("删除", "🗑", "danger")
-        self.bot_profile_del.clicked.connect(self._del_bot_profile)
-        profile_top.addWidget(self.bot_profile_del)
-        profile_layout.addLayout(profile_top)
-
-        self.bot_profile_list = QListWidget()
-        self.bot_profile_list.setMinimumHeight(60)
-        self.bot_profile_list.setMaximumHeight(100)
-        self.bot_profile_list.setStyleSheet(f"""
-            QListWidget {{ background: {C_BG_INPUT}; border: 1px solid {C_BORDER}; border-radius: 6px; color: {C_TEXT}; }}
-            QListWidget::item {{ padding: 8px; border-bottom: 1px solid {C_BORDER}; }}
-            QListWidget::item:selected {{ background: {C_PRIMARY}; }}
+        self.bot_table = QTableWidget(0, 4)
+        self.bot_table.setHorizontalHeaderLabels(["名称", "AppID", "状态", "操作"])
+        self.bot_table.horizontalHeader().setStretchLastSection(False)
+        self.bot_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.bot_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.bot_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.bot_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.bot_table.verticalHeader().setVisible(False)
+        self.bot_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.bot_table.setMinimumHeight(120)
+        self.bot_table.setMaximumHeight(200)
+        self.bot_table.setStyleSheet(f"""
+            QTableWidget {{ background: {C_BG_INPUT}; border: 1px solid {C_BORDER}; border-radius: 6px; color: {C_TEXT}; }}
+            QTableWidget::item {{ padding: 4px; }}
+            QHeaderView::section {{ background: {C_BG_DARK}; color: {C_TEXT}; border: 1px solid {C_BORDER}; padding: 4px; }}
         """)
-        profile_layout.addWidget(self.bot_profile_list)
+        self.bot_table.itemSelectionChanged.connect(self._on_bot_selection_changed)
+        instance_layout.addWidget(self.bot_table)
 
-        profile_btns = QHBoxLayout()
-        self.bot_profile_load = IconButton("加载选中", "📂", "outline")
-        self.bot_profile_load.clicked.connect(self._load_bot_profile)
-        profile_btns.addWidget(self.bot_profile_load)
-        self.bot_profile_save = IconButton("覆盖保存", "💾", "outline")
-        self.bot_profile_save.clicked.connect(self._save_bot_profile)
-        profile_btns.addWidget(self.bot_profile_save)
-        profile_btns.addStretch()
-        profile_layout.addLayout(profile_btns)
-        layout.addWidget(profile_box)
+        layout.addWidget(instance_box)
 
         # QQ官方协议
-        official_box = QGroupBox("连接参数")
+        official_box = QGroupBox("编辑选中机器人")
         off_form = QFormLayout(official_box)
         off_form.setSpacing(8)
         off_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.bot_name = QLineEdit()
+        self.bot_name.setPlaceholderText("给机器人起个名字")
+        off_form.addRow("名称:", self.bot_name)
 
         proto_row = QHBoxLayout()
         self.bot_proto_combo = QComboBox()
@@ -1246,7 +1229,41 @@ class MainWindow(QMainWindow):
         self.bot_onebot_http = QLineEdit("http://127.0.0.1:8080")
         off_form.addRow("OneBot HTTP:", self.bot_onebot_http)
 
+        save_btn = IconButton("💾 保存更改", "💾", "primary")
+        save_btn.clicked.connect(self._save_bot_instance)
+        off_form.addRow("", save_btn)
+
         layout.addWidget(official_box)
+
+        # AI 覆盖配置（每个机器人可独立配置）
+        ai_box = QGroupBox("AI 覆盖配置（留空则使用全局 AI 设置）")
+        ai_form = QFormLayout(ai_box)
+        ai_form.setSpacing(8)
+        ai_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.bot_ai_provider = QComboBox()
+        self.bot_ai_provider.addItem("（使用全局默认）", "")
+        self.bot_ai_provider.setStyleSheet(f"QComboBox {{ background: {C_BG_INPUT}; color: {C_TEXT}; border: 1px solid {C_BORDER}; border-radius: 6px; padding: 6px 10px; min-width: 140px; }} QComboBox QAbstractItemView {{ background: {C_BG_INPUT}; color: {C_TEXT}; selection-background: {C_PRIMARY}; }}")
+        ai_form.addRow("AI 提供者:", self.bot_ai_provider)
+
+        self.bot_ai_model = QLineEdit()
+        self.bot_ai_model.setPlaceholderText("留空则使用提供者默认模型")
+        ai_form.addRow("模型:", self.bot_ai_model)
+
+        self.bot_ai_system_prompt = QTextEdit()
+        self.bot_ai_system_prompt.setPlaceholderText("留空则使用全局系统提示词")
+        self.bot_ai_system_prompt.setMaximumHeight(100)
+        self.bot_ai_system_prompt.setStyleSheet(f"background: {C_BG_INPUT}; color: {C_TEXT}; border: 1px solid {C_BORDER}; border-radius: 6px; padding: 6px;")
+        ai_form.addRow("系统提示词:", self.bot_ai_system_prompt)
+
+        self.bot_ai_enable_tools = QCheckBox("启用工具调用")
+        self.bot_ai_enable_tools.setTristate(True)
+        self.bot_ai_enable_tools.setCheckState(Qt.CheckState.PartiallyChecked)
+        self.bot_ai_enable_tools.setToolTip("半选=继承全局设置，勾选=强制启用工具，不勾选=强制禁用工具")
+        self.bot_ai_enable_tools.setStyleSheet(f"color: {C_TEXT};")
+        ai_form.addRow("", self.bot_ai_enable_tools)
+
+        layout.addWidget(ai_box)
 
         # 用户权限管理
         auth_box = QGroupBox("用户权限管理")
@@ -1290,22 +1307,18 @@ class MainWindow(QMainWindow):
         send_row = QHBoxLayout()
         self.bot_btn_test = IconButton("发送文字", "📨")
         self.bot_btn_test.clicked.connect(lambda: self._bot_send("text"))
-        self.bot_btn_test.setEnabled(False)
         send_row.addWidget(self.bot_btn_test)
 
         self.bot_btn_img = IconButton("发送图片", "🖼", "outline")
         self.bot_btn_img.clicked.connect(lambda: self._bot_send("image"))
-        self.bot_btn_img.setEnabled(False)
         send_row.addWidget(self.bot_btn_img)
 
         self.bot_btn_file = IconButton("发送文件", "📎", "outline")
         self.bot_btn_file.clicked.connect(lambda: self._bot_send("file"))
-        self.bot_btn_file.setEnabled(False)
         send_row.addWidget(self.bot_btn_file)
 
         self.bot_btn_video = IconButton("发送视频", "🎬", "outline")
         self.bot_btn_video.clicked.connect(lambda: self._bot_send("video"))
-        self.bot_btn_video.setEnabled(False)
         send_row.addWidget(self.bot_btn_video)
 
         send_row.addStretch()
@@ -1587,7 +1600,7 @@ class MainWindow(QMainWindow):
 
     def _stop_sandbox(self):
         self.event_bus.stop()
-        self.bot_manager.stop_bot()
+        self.bot_manager.stop_all()
         self.sandbox.stop()
         self._log("沙盒已停止")
         self.dash_btn_start.setEnabled(True)
@@ -1603,61 +1616,153 @@ class MainWindow(QMainWindow):
             self.dash_root_edit.setText(root)
             self._start_sandbox()
 
-    def _toggle_bot(self):
-        if self.bot_manager.is_running():
-            self._stop_bot()
-            return
+    def _refresh_bot_table(self):
+        self.bot_table.setRowCount(len(self.bot_instances))
+        for i, inst in enumerate(self.bot_instances):
+            name_item = QTableWidgetItem(inst.get("name", ""))
+            name_item.setData(Qt.ItemDataRole.UserRole, i)
+            self.bot_table.setItem(i, 0, name_item)
+            self.bot_table.setItem(i, 1, QTableWidgetItem(inst.get("app_id", "")))
 
-        config = self._get_bot_config()
+            bot_id = inst.get("bot_id", "")
+            if bot_id and self.bot_manager.is_running(bot_id):
+                status_text = "✅ 已连接"
+                status_color = C_SUCCESS
+            elif bot_id and self.bot_manager.get_platform(bot_id) is not None:
+                status_text = "🔄 启动中"
+                status_color = C_WARNING
+            else:
+                status_text = "⏹ 已停止"
+                status_color = C_TEXT_DIM
+
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor(status_color))
+            self.bot_table.setItem(i, 2, status_item)
+
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(2, 2, 2, 2)
+            action_layout.setSpacing(4)
+            bot_id = inst.get("bot_id", "")
+            if bot_id and self.bot_manager.is_running(bot_id):
+                stop_btn = QPushButton("停止")
+                stop_btn.setStyleSheet(f"QPushButton {{ background: {C_DANGER}; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; }} QPushButton:hover {{ background: #c0392b; }}")
+                stop_btn.clicked.connect(lambda checked, bid=bot_id: self._stop_single_bot(bid))
+                action_layout.addWidget(stop_btn)
+            else:
+                start_btn = QPushButton("启动")
+                start_btn.setStyleSheet(f"QPushButton {{ background: {C_SUCCESS}; color: white; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; }} QPushButton:hover {{ background: #27ae60; }}")
+                start_btn.clicked.connect(lambda checked, idx=i: self._start_single_bot(idx))
+                action_layout.addWidget(start_btn)
+            action_layout.addStretch()
+            self.bot_table.setCellWidget(i, 3, action_widget)
+        self.bot_table.resizeRowsToContents()
+
+    def _start_single_bot(self, idx: int):
+        if idx < 0 or idx >= len(self.bot_instances):
+            return
+        inst = self.bot_instances[idx]
+        config = BotConfig.from_dict(inst)
         if not config.app_id or not (config.app_secret or config.bot_token):
-            QMessageBox.warning(self, "提示", "请填写 AppID 和 AppSecret")
+            QMessageBox.warning(self, "提示", f"机器人 '{config.name}' 缺少 AppID 或 AppSecret")
             return
-
-        self.bot_manager.configure(config.to_dict())
+        bot_id = config.app_id
+        inst["bot_id"] = bot_id
+        self.bot_manager.configure(config.to_dict(), bot_id=bot_id)
         self.bot_manager.on_message(self._on_bot_message)
-        self.bot_manager.start_bot()
-        self.bot_btn_connect.setEnabled(False)
-        self.bot_btn_connect.setText("连接中...")
-        self.bot_status_title.setText("连接中...")
-        self.bot_status_detail.setText("正在建立 WebSocket 连接")
-        self._bot_check_count = 0
-        QTimer.singleShot(2500, self._check_bot_connection)
+        self.bot_manager.start_bot(bot_id)
+        self._log(f"正在启动机器人: {config.name} ({bot_id})")
+        self._refresh_bot_table()
+        QTimer.singleShot(3000, self._refresh_bot_table)
 
-    def _check_bot_connection(self):
-        self._bot_check_count += 1
-        if self.bot_manager._platform and self.bot_manager._platform._ws_connected:
-            self.bot_btn_connect.setText("已连接 ✓")
-            self.bot_btn_connect.setEnabled(False)
-            self.bot_btn_disconnect.setEnabled(True)
-            for b in [self.bot_btn_test, self.bot_btn_img, self.bot_btn_file, self.bot_btn_video]:
-                b.setEnabled(True)
-            self.bot_indicator.setStyleSheet(f"font-size: 32px; color: {C_SUCCESS};")
-            self.bot_status_title.setText("已连接")
-            self.bot_status_detail.setText(f"协议: {self.bot_manager.config.protocol.value}")
-            self._log("QQ机器人已连接成功")
-        elif self._bot_check_count < 8:
-            QTimer.singleShot(2500, self._check_bot_connection)
+    def _stop_single_bot(self, bot_id: str):
+        self.bot_manager.stop_bot(bot_id)
+        self._log(f"已停止机器人: {bot_id}")
+        self._refresh_bot_table()
+
+    def _start_all_bots(self):
+        for i in range(len(self.bot_instances)):
+            inst = self.bot_instances[i]
+            bot_id = inst.get("bot_id", "")
+            if not bot_id or not self.bot_manager.is_running(bot_id):
+                self._start_single_bot(i)
+        self._log("已请求启动所有机器人")
+
+    def _stop_all_bots(self):
+        for inst in self.bot_instances:
+            bot_id = inst.get("bot_id", "")
+            if bot_id and self.bot_manager.is_running(bot_id):
+                self.bot_manager.stop_bot(bot_id)
+        self._log("已停止所有机器人")
+        self._refresh_bot_table()
+
+    def _on_bot_selection_changed(self):
+        row = self.bot_table.currentRow()
+        if row < 0 or row >= len(self.bot_instances):
+            return
+        inst = self.bot_instances[row]
+        cfg = BotConfig.from_dict(inst)
+        self._apply_bot_config_to_ui(cfg)
+        self._apply_ai_overrides_to_ui(inst.get("ai_overrides", {}))
+
+    def _add_bot_instance(self):
+        cfg = self._get_bot_config()
+        if not cfg.name or not cfg.app_id:
+            QMessageBox.warning(self, "提示", "请先填写名称和 AppID")
+            return
+        data = cfg.to_dict()
+        data["ai_overrides"] = self._read_ai_overrides_from_ui()
+        data["bot_id"] = ""
+        self.bot_instances.append(data)
+        self._refresh_bot_table()
+        self._save_bot_configs()
+        self._log(f"已添加机器人实例: {cfg.name}")
+
+    def _del_bot_instance(self):
+        row = self.bot_table.currentRow()
+        if row < 0 or row >= len(self.bot_instances):
+            QMessageBox.warning(self, "提示", "请先在表格中选中要删除的机器人")
+            return
+        inst = self.bot_instances[row]
+        bot_id = inst.get("bot_id", "")
+        if bot_id and self.bot_manager.is_running(bot_id):
+            self.bot_manager.stop_bot(bot_id)
+        removed = self.bot_instances.pop(row)
+        self._refresh_bot_table()
+        self._save_bot_configs()
+        self._log(f"已删除机器人实例: {removed.get('name', '')}")
+
+    def _save_bot_instance(self):
+        row = self.bot_table.currentRow()
+        if row < 0 or row >= len(self.bot_instances):
+            QMessageBox.warning(self, "提示", "请先在表格中选中要保存的机器人")
+            return
+        cfg = self._get_bot_config()
+        old_bot_id = self.bot_instances[row].get("bot_id", "")
+        data = cfg.to_dict()
+        data["ai_overrides"] = self._read_ai_overrides_from_ui()
+        if old_bot_id and old_bot_id != cfg.app_id:
+            if self.bot_manager.is_running(old_bot_id):
+                self.bot_manager.stop_bot(old_bot_id)
+            data["bot_id"] = ""
         else:
-            self.bot_btn_connect.setText("连接机器人")
-            self.bot_btn_connect.setEnabled(True)
-            self.bot_indicator.setStyleSheet(f"font-size: 32px; color: {C_DANGER};")
-            self.bot_status_title.setText("连接失败")
-            self.bot_status_detail.setText("请检查 AppID/Token 和网络")
-            QMessageBox.warning(self, "连接失败", "无法连接QQ机器人，请检查配置")
-
-    def _stop_bot(self):
-        self.bot_manager.stop_bot()
-        self.bot_btn_connect.setText("连接机器人")
-        self.bot_btn_connect.setEnabled(True)
-        self.bot_btn_disconnect.setEnabled(False)
-        for b in [self.bot_btn_test, self.bot_btn_img, self.bot_btn_file, self.bot_btn_video]:
-            b.setEnabled(False)
-        self.bot_indicator.setStyleSheet(f"font-size: 32px; color: {C_DANGER};")
-        self.bot_status_title.setText("未连接")
-        self.bot_status_detail.setText("连接已断开")
-        self._log("QQ机器人已断开")
+            data["bot_id"] = old_bot_id
+        self.bot_instances[row] = data
+        self._refresh_bot_table()
+        self._save_bot_configs()
+        self._log(f"已保存机器人配置: {cfg.name}")
 
     def _bot_send(self, msg_type: str):
+        row = self.bot_table.currentRow()
+        if row < 0 or row >= len(self.bot_instances):
+            QMessageBox.warning(self, "提示", "请先在表格中选中要使用的机器人")
+            return
+        inst = self.bot_instances[row]
+        bot_id = inst.get("bot_id", "")
+        if not bot_id or not self.bot_manager.is_running(bot_id):
+            QMessageBox.warning(self, "提示", "所选机器人未在运行")
+            return
+
         channel = self.bot_test_channel.text().strip()
         if not channel:
             QMessageBox.warning(self, "提示", "请填写目标ID")
@@ -1668,7 +1773,7 @@ class MainWindow(QMainWindow):
             if not msg:
                 QMessageBox.warning(self, "提示", "请填写文字内容")
                 return
-            ok = self.bot_manager.send_message(channel, msg)
+            ok = self.bot_manager.send_message(channel, msg, bot_id=bot_id)
             self._log(f"发送文字 -> {channel}: {msg[:50]}", "success" if ok else "error")
         else:
             path, _ = QFileDialog.getOpenFileName(
@@ -1679,11 +1784,11 @@ class MainWindow(QMainWindow):
                 return
             size = os.path.getsize(path)
             if msg_type == "image":
-                ok = self.bot_manager.send_image(channel, path, self.bot_test_msg.text().strip())
+                ok = self.bot_manager.send_image(channel, path, self.bot_test_msg.text().strip(), bot_id=bot_id)
             elif msg_type == "video":
-                ok = self.bot_manager.send_message(channel, f"[视频] {os.path.basename(path)}")
+                ok = self.bot_manager.send_message(channel, f"[视频] {os.path.basename(path)}", bot_id=bot_id)
             else:
-                ok = self.bot_manager.send_message(channel, f"[文件] {os.path.basename(path)} ({size/1024:.0f}KB)")
+                ok = self.bot_manager.send_message(channel, f"[文件] {os.path.basename(path)} ({size/1024:.0f}KB)", bot_id=bot_id)
             self._log(f"发送{msg_type} -> {channel}: {os.path.basename(path)}", "success" if ok else "error")
 
         if ok:
@@ -1691,10 +1796,10 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "失败", f"{msg_type}消息发送失败，请检查连接")
 
-    BOT_PROFILES_FILE = str(APP_DIR / "bot_profiles.json")
 
     def _get_bot_config(self) -> BotConfig:
         config = BotConfig()
+        config.name = self.bot_name.text().strip() or f"Bot-{self.bot_appid.text().strip()}"
         config.protocol = BotProtocol.QQ_OFFICIAL if self.bot_proto_combo.currentIndex() == 0 else BotProtocol.ONEBOT
         config.app_id = self.bot_appid.text().strip()
         config.app_secret = self.bot_appsecret.text().strip()
@@ -1709,6 +1814,7 @@ class MainWindow(QMainWindow):
         return config
 
     def _apply_bot_config_to_ui(self, cfg: BotConfig):
+        self.bot_name.setText(cfg.name)
         self.bot_appid.setText(cfg.app_id)
         self.bot_appsecret.setText(cfg.app_secret)
         self.bot_token.setText(cfg.bot_token)
@@ -1720,74 +1826,51 @@ class MainWindow(QMainWindow):
         self.bot_onebot_http.setText(cfg.onebot_http_url)
         self.bot_proto_combo.setCurrentIndex(0 if cfg.protocol == BotProtocol.QQ_OFFICIAL else 1)
 
-    def _load_bot_profiles(self):
-        path = self.BOT_PROFILES_FILE
-        if not os.path.isfile(path):
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                profiles = json.load(f)
-            self.bot_profile_list.clear()
-            for p in profiles:
-                item = QListWidgetItem(p.get("name", "未命名"))
-                item.setData(Qt.ItemDataRole.UserRole, p)
-                self.bot_profile_list.addItem(item)
-        except Exception as e:
-            logger.warning(f"加载机器人配置失败: {e}")
+    def _refresh_bot_ai_provider_list(self):
+        self.bot_ai_provider.clear()
+        self.bot_ai_provider.addItem("（使用全局默认）", "")
+        cfg = getattr(self, '_cached_ai_config', None)
+        if cfg:
+            for p in cfg.providers:
+                if p.api_key:
+                    self.bot_ai_provider.addItem(p.display_name(), p.name)
 
-    def _save_bot_profiles(self):
-        profiles = []
-        for i in range(self.bot_profile_list.count()):
-            item = self.bot_profile_list.item(i)
-            data = item.data(Qt.ItemDataRole.UserRole)
-            if data:
-                profiles.append(data)
-        try:
-            with open(self.BOT_PROFILES_FILE, "w", encoding="utf-8") as f:
-                json.dump(profiles, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.warning(f"保存机器人配置失败: {e}")
+    def _apply_ai_overrides_to_ui(self, overrides: dict):
+        provider_name = overrides.get("provider", "")
+        idx = self.bot_ai_provider.findData(provider_name)
+        self.bot_ai_provider.setCurrentIndex(idx if idx >= 0 else 0)
+        self.bot_ai_model.setText(overrides.get("model", ""))
+        self.bot_ai_system_prompt.setPlainText(overrides.get("system_prompt", ""))
+        et = overrides.get("enable_tools")
+        if et is None:
+            self.bot_ai_enable_tools.setCheckState(Qt.CheckState.PartiallyChecked)
+        elif et:
+            self.bot_ai_enable_tools.setCheckState(Qt.CheckState.Checked)
+        else:
+            self.bot_ai_enable_tools.setCheckState(Qt.CheckState.Unchecked)
 
-    def _add_bot_profile(self):
-        from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "添加机器人配置", "配置名称:")
-        if ok and name.strip():
-            cfg = self._get_bot_config()
-            data = cfg.to_dict()
-            data["name"] = name.strip()
-            item = QListWidgetItem(name.strip())
-            item.setData(Qt.ItemDataRole.UserRole, data)
-            self.bot_profile_list.addItem(item)
-            self._save_bot_profiles()
-            self._log(f"已添加机器人配置: {name.strip()}")
+    def _read_ai_overrides_from_ui(self) -> dict:
+        overrides = {
+            "provider": self.bot_ai_provider.currentData() or "",
+            "model": self.bot_ai_model.text().strip(),
+            "system_prompt": self.bot_ai_system_prompt.toPlainText().strip(),
+        }
+        state = self.bot_ai_enable_tools.checkState()
+        if state == Qt.CheckState.Checked:
+            overrides["enable_tools"] = True
+        elif state == Qt.CheckState.Unchecked:
+            overrides["enable_tools"] = False
+        return overrides
 
-    def _del_bot_profile(self):
-        item = self.bot_profile_list.currentItem()
-        if item:
-            self.bot_profile_list.takeItem(self.bot_profile_list.row(item))
-            self._save_bot_profiles()
-
-    def _load_bot_profile(self):
-        item = self.bot_profile_list.currentItem()
-        if not item:
-            return
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if data:
-            cfg = BotConfig.from_dict(data)
-            self._apply_bot_config_to_ui(cfg)
-            self._log(f"已加载机器人配置: {item.text()}")
-
-    def _save_bot_profile(self):
-        item = self.bot_profile_list.currentItem()
-        if not item:
-            return
-        cfg = self._get_bot_config()
-        data = cfg.to_dict()
-        name = item.text()
-        data["name"] = name
-        item.setData(Qt.ItemDataRole.UserRole, data)
-        self._save_bot_profiles()
-        self._log(f"已保存机器人配置: {name}")
+    def _save_bot_configs(self):
+        bots_data = {"bots": self.bot_instances}
+        with open(BOT_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(bots_data, f, ensure_ascii=False, indent=2)
+        root = getattr(self.sandbox.config, 'root_dir', None) if hasattr(self, 'sandbox') else None
+        if root:
+            alt = os.path.join(root, "bot_config.json")
+            with open(alt, "w", encoding="utf-8") as f:
+                json.dump(bots_data, f, ensure_ascii=False, indent=2)
 
     def _add_auth_user(self):
         user_id, ok = QInputDialog.getText(self, "添加授权用户", "输入用户ID:")
@@ -2014,16 +2097,16 @@ class MainWindow(QMainWindow):
         )
         mem_path = os.path.join(APP_DIR, "conversation_memory.json")
         self.conv_memory = ConversationMemory(persist_path=mem_path)
-        send_func = lambda cid, msg, mid="", etype="": self.bot_manager.send_message(cid, msg, mid, etype)
+        send_func = lambda bot_id, cid, msg, mid="", etype="": self.bot_manager.send_message(cid, msg, mid, etype, bot_id=bot_id)
         ai_stage = AIResponseStage(
             provider_manager=self.provider_manager,
-            get_config=self._get_pipeline_ai_config,
+            get_config=lambda bot_id="": self._get_pipeline_ai_config(bot_id),
             get_sandbox_root=lambda: self.sandbox.config.root_dir or "",
             memory=self.conv_memory,
             log_func=lambda msg: self._log(msg, "info"),
             sandbox_manager=self.sandbox,
         )
-        send_file_func = lambda cid, path, text, mid, etype: self.bot_manager.send_file(cid, path, text, mid, etype)
+        send_file_func = lambda bot_id, cid, path, text, mid, etype: self.bot_manager.send_file(cid, path, text, mid, etype, bot_id=bot_id)
         respond_stage = RespondStage(
             send_func=send_func,
             send_file_func=send_file_func,
@@ -2170,9 +2253,49 @@ class Plugin:
             self.chat_status.setStyleSheet(f"color: {C_DANGER}; font-weight: 600; font-size: 13px;")
             self.chat_status.setText("● AI 未就绪")
 
-    def _get_pipeline_ai_config(self):
+    def _get_pipeline_ai_config(self, bot_id: str = ""):
         with self._ai_config_lock:
-            return self._cached_ai_config
+            cfg = self._cached_ai_config
+        if not bot_id:
+            return cfg
+        # Merge per-bot AI overrides
+        for inst in self.bot_instances:
+            if inst.get("bot_id") == bot_id or inst.get("app_id") == bot_id:
+                overrides = inst.get("ai_overrides", {})
+                if not overrides:
+                    return cfg
+                import copy
+                merged = copy.deepcopy(cfg)
+                provider_name = overrides.get("provider", "")
+                model = overrides.get("model", "")
+                system_prompt = overrides.get("system_prompt", "")
+                if provider_name:
+                    for p in merged.providers:
+                        if p.name == provider_name and p.api_key:
+                            merged.active_provider = provider_name
+                            break
+                if model:
+                    pc = merged.get_active_provider_config()
+                    pc.model = model
+                    # also update the matching provider in the list
+                    for p in merged.providers:
+                        if p.name == merged.active_provider:
+                            p.model = model
+                            break
+                if system_prompt:
+                    pc = merged.get_active_provider_config()
+                    pc.system_prompt = system_prompt
+                    for p in merged.providers:
+                        if p.name == merged.active_provider:
+                            p.system_prompt = system_prompt
+                            break
+                et = overrides.get("enable_tools")
+                if et is not None:
+                    merged.enable_tools = et
+                    pc = merged.get_active_provider_config()
+                    pc.enable_tools = et
+                return merged
+        return cfg
 
     # ── AI 方法 ───────────────────────────────────────────
 
@@ -2460,6 +2583,7 @@ class Plugin:
     def _save_ai_config(self):
         self.ai_config = self._get_ai_config_from_ui()
         self._cached_ai_config = self.ai_config
+        self._refresh_bot_ai_provider_list()
         self.ai_config.save(AI_CONFIG_FILE)
         if self.sandbox.config.root_dir:
             alt = os.path.join(self.sandbox.config.root_dir, "ai_config.json")
@@ -2854,14 +2978,7 @@ class Plugin:
         if self.sandbox.config.root_dir:
             alt = os.path.join(self.sandbox.config.root_dir, "sandbox_config.json")
             self.sandbox.config.save(alt)
-        bot_config = self._get_bot_config()
-        self.bot_manager.configure(bot_config.to_dict())
-        with open(BOT_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(bot_config.to_dict(), f, ensure_ascii=False, indent=2)
-        if self.sandbox.config.root_dir:
-            alt = os.path.join(self.sandbox.config.root_dir, "bot_config.json")
-            with open(alt, "w", encoding="utf-8") as f:
-                json.dump(bot_config.to_dict(), f, ensure_ascii=False, indent=2)
+        self._save_bot_configs()
         self._save_user_config()
         self._save_ai_config()
         self._log("配置已保存", "success")
@@ -2890,17 +3007,17 @@ class Plugin:
         if os.path.exists(bot_path):
             with open(bot_path, encoding="utf-8") as f:
                 data = json.load(f)
-            config = BotConfig.from_dict(data)
-            self.bot_appid.setText(config.app_id)
-            self.bot_appsecret.setText(config.app_secret)
-            self.bot_token.setText(config.bot_token)
-            self.bot_ws_url.setText(config.ws_url)
-            self.bot_api_url.setText(config.api_url)
-            self.bot_sandbox_api_url.setText(config.sandbox_api_url)
-            self.bot_use_sandbox.setChecked(config.use_sandbox)
-            self.bot_onebot_ws.setText(config.onebot_ws_url)
-            self.bot_onebot_http.setText(config.onebot_http_url)
-            self.bot_proto_combo.setCurrentIndex(0 if config.protocol == BotProtocol.QQ_OFFICIAL else 1)
+            if isinstance(data, dict) and "bots" in data:
+                self.bot_instances = data["bots"]
+            elif isinstance(data, list):
+                self.bot_instances = data
+            else:
+                self.bot_instances = [data]
+            self._refresh_bot_table()
+            if self.bot_instances:
+                cfg = BotConfig.from_dict(self.bot_instances[0])
+                self._apply_bot_config_to_ui(cfg)
+                self._apply_ai_overrides_to_ui(self.bot_instances[0].get("ai_overrides", {}))
             self._log("Bot配置文件已加载")
 
         ai_path = AI_CONFIG_FILE
@@ -2917,9 +3034,9 @@ class Plugin:
             self._cached_ai_config = loaded
             self._apply_ai_config_to_ui(loaded)
             self._log("AI配置文件已加载")
+            self._refresh_bot_ai_provider_list()
 
         self._load_user_config()
-        self._load_bot_profiles()
         self._refresh_plugin_list()
 
     def _show_about(self):

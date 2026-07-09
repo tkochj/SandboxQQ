@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 
 @dataclass
 class MessageEvent:
+    bot_id: str = ""
     platform_name: str = ""
     message_id: str = ""
     sender_id: str = ""

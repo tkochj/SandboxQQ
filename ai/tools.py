@@ -616,6 +616,49 @@ class SendFileTool(SandboxTool):
         self._last_file = ap
         return f"已准备发送文件: {fname} ({_fmt_size(size)})\n{('描述: '+desc) if desc else ''}"
 
+class CleanSandboxTool(SandboxTool):
+    name = "clean_sandbox"; display_name = "清理沙盒"
+    description = "清理沙盒目录中的临时文件和生成的文件。保留目录结构，只删除 outputs/、downloads/、temp/ 等目录下的文件，以及沙盒根目录的 .py/.png/.jpg/.txt/.zip 文件。"
+    permission_key = "write_file"
+    parameters = {"type":"object","properties":{"confirm":{"type":"boolean","description":"确认清理，必须为true"}},"required":["confirm"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        if not kwargs.get("confirm"):
+            return "错误: 请设置 confirm=true 确认清理操作"
+        import shutil
+        removed = 0; errors = 0; kept_dirs = 0
+        # Clean specific subdirectories
+        for sub in ("outputs", "downloads", "temp", "_cache"):
+            sp = os.path.join(sandbox_root, sub)
+            if os.path.isdir(sp):
+                try:
+                    for entry in os.listdir(sp):
+                        ep = os.path.join(sp, entry)
+                        try:
+                            if os.path.isfile(ep) or os.path.islink(ep):
+                                os.remove(ep); removed += 1
+                            elif os.path.isdir(ep):
+                                shutil.rmtree(ep); removed += 1
+                        except Exception:
+                            errors += 1
+                    kept_dirs += 1
+                except Exception:
+                    errors += 1
+        # Clean root-level generated files
+        for entry in os.listdir(sandbox_root):
+            ep = os.path.join(sandbox_root, entry)
+            if os.path.isfile(ep):
+                ext = os.path.splitext(entry)[1].lower()
+                if ext in (".py", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".zip", ".txt", ".csv", ".json", ".xml", ".html", ".pdf"):
+                    try:
+                        os.remove(ep); removed += 1
+                    except Exception:
+                        errors += 1
+        msg = f"清理完成: 删除了 {removed} 个文件"
+        if errors: msg += f", {errors} 个错误"
+        if kept_dirs: msg += f", 保留了 {kept_dirs} 个子目录"
+        return msg
+
 TOOL_REGISTRY: List[SandboxTool] = [
     ExecutePythonTool(), ReadFileTool(), WriteFileTool(),
     ListFilesTool(), RunShellTool(),
@@ -624,7 +667,7 @@ TOOL_REGISTRY: List[SandboxTool] = [
     WebSearchTool(),
     PdfExtractTool(), OcrTool(), TranslateTool(), HashTool(),
     DateTimeTool(), DataConvertTool(), QRCodeTool(), ChartTool(),
-    SendFileTool(),
+    SendFileTool(), CleanSandboxTool(),
 ]
 
 def get_tool_definitions(perms: Optional[ToolPermissions] = None) -> List[dict]:

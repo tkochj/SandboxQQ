@@ -26,7 +26,7 @@ class AIResponseStage(Stage):
     def __init__(
         self,
         provider_manager: ProviderManager,
-        get_config: Callable,
+        get_config: Callable[[str], AIConfig],
         get_sandbox_root: Callable = None,
         memory: Optional[ConversationMemory] = None,
         log_func: Optional[Callable] = None,
@@ -38,6 +38,7 @@ class AIResponseStage(Stage):
         self._memory = memory or ConversationMemory()
         self._log = log_func
         self._sandbox_manager = sandbox_manager
+        self._known_users: dict = {}  # channel_key -> {user_id: display_name}
 
     async def _analyze_image(self, img_path: str, config) -> str:
         if not os.path.isfile(img_path):
@@ -104,7 +105,7 @@ class AIResponseStage(Stage):
             yield
             return
 
-        config = self._get_config()
+        config = self._get_config(getattr(event, 'bot_id', ''))
         if not config:
             event.set_reply("AI 未配置")
             yield
@@ -147,7 +148,19 @@ class AIResponseStage(Stage):
             yield
             return
 
-        channel_key = f"{event.platform_name}:{event.channel_id}"
+        # Attach sender identity for multi-user context
+        sender_tag = event.sender_name or event.sender_id
+        if sender_tag:
+            if event.sender_id:
+                user_content = f"[{sender_tag}]({event.sender_id}): {user_content}"
+            else:
+                user_content = f"[{sender_tag}]: {user_content}"
+
+        # Record known users per conversation channel for @ mention support
+        channel_key = f"{event.bot_id}:{event.platform_name}:{event.channel_id}"
+        if event.sender_id and sender_tag:
+            self._known_users.setdefault(channel_key, {})
+            self._known_users[channel_key][event.sender_id] = sender_tag
         self._memory.add_message(channel_key, "user", user_content)
         if self._log:
             self._log(f"[AI] 用户: {user_content[:80]}")
@@ -158,6 +171,16 @@ class AIResponseStage(Stage):
         )
 
         system = pc.system_prompt or config.system_prompt
+        # Identify the bot in multi-bot scenarios
+        bot_label = event.bot_id or ""
+        if bot_label:
+            system = f"[当前机器人: {bot_label}]\n" + system
+        # Expose known users for @ mention ability in group chats
+        users = self._known_users.get(channel_key, {})
+        if users and "GROUP" in event.msg_type:
+            roster = "\n".join(f"  [{name}]({uid})" for uid, name in users.items())
+            system += f"\n\n## 群成员\n以下是在本群中出现过的成员，你可以用 `<@!对方openID>` 格式 @ 他们：\n{roster}\n"
+            system += "\n在回复群消息时，如需 @ 某人，请直接在回复内容中包含 `<@!对方openID>`。"
         skills_mgr = SkillsManager()
         skills_mgr.load_from_config(config.skills)
         enabled_skills = skills_mgr.get_enabled()
@@ -188,6 +211,12 @@ class AIResponseStage(Stage):
 
         max_rounds = max(pc.max_tool_rounds or 0, config.max_tool_rounds or 0, 10)
         enable_tools = pc.enable_tools or config.enable_tools
+
+        logger.debug(
+            "AI stage: bot=%s channel=%s type=%s pc.name=%s pc.enable_tools=%s cfg.enable_tools=%s enable_tools=%s",
+            event.bot_id, event.channel_id, event.msg_type,
+            pc.name, pc.enable_tools, config.enable_tools, enable_tools,
+        )
 
         provider = self._provider_manager.get_or_create(config, pc if pc and pc.name != "default" else None)
         if not provider:
