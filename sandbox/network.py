@@ -52,7 +52,10 @@ class NetworkSandbox:
         if self._active:
             return
         if self.allowed_hosts:
-            self._setup_firewall_rules()
+            try:
+                self._setup_firewall_rules()
+            except Exception as e:
+                logger.warning(f"Firewall rule setup failed (non-fatal): {e}")
         self._active = True
         mode = "whitelist" if self.allowed_hosts else "pass-through"
         logger.info(f"Network sandbox activated (mode={mode}, sid={'yes' if self._sid_str else 'no'})")
@@ -79,7 +82,7 @@ class NetworkSandbox:
     def _make_identity(self, rule, proc_path: str):
         """Apply the identity condition: AppContainer SID or program name fallback."""
         if self._sid_str:
-            rule.LocalUser = f"SDDL:{self._sid_str}"
+            rule.LocalUser = self._sid_str  # "S-1-15-2-..."
         else:
             rule.ApplicationName = proc_path
 
@@ -124,9 +127,9 @@ class NetworkSandbox:
             allow_proxy.Direction = 1
             allow_proxy.Enabled = True
             allow_proxy.Profiles = 0x7FFFFFFF
-            allow_proxy.RemoteAddresses = "127.0.0.0/8"
-            allow_proxy.LocalPorts = "23100-23199"
             allow_proxy.Protocol = 6  # TCP
+            allow_proxy.RemoteAddresses = "127.0.0.0/8"
+            allow_proxy.RemotePorts = "23100-23199"
             self._make_identity(allow_proxy, proc_path)
             try:
                 fw_policy.Rules.Add(allow_proxy)
