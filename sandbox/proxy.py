@@ -68,6 +68,7 @@ class ProxySandbox:
             logger.info("Proxy stopped")
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        loop = asyncio.get_running_loop()
         try:
             data = await asyncio.wait_for(reader.readline(), timeout=10)
             if not data:
@@ -81,20 +82,23 @@ class ProxySandbox:
             if method.upper() == "CONNECT":
                 host_port = target
                 host = host_port.rsplit(":", 1)[0] if ":" in host_port else host_port
+                remote_port = int(host_port.rsplit(":", 1)[1]) if ":" in host_port else 443
                 if not self.is_allowed(host):
                     writer.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
                     await writer.drain()
                     logger.warning(f"Proxy BLOCKED CONNECT: {host}")
                     return
-                # Read headers until empty line
                 while True:
                     line = await asyncio.wait_for(reader.readline(), timeout=10)
                     if line in (b"\r\n", b"\n", b""):
                         break
                 try:
-                    remote_reader, remote_writer = await asyncio.wait_for(
-                        asyncio.open_connection(host, host_port.rsplit(":", 1)[1] if ":" in host_port else 443),
-                        timeout=10,
+                    # Use run_in_executor for socket connect (Windows child thread compat)
+                    remote_sock = await loop.run_in_executor(
+                        None, self._blocking_connect, host, remote_port
+                    )
+                    remote_reader, remote_writer = await asyncio.open_connection(
+                        sock=remote_sock
                     )
                 except Exception as e:
                     writer.write(f"HTTP/1.1 502 Bad Gateway\r\n\r\n".encode())
@@ -110,16 +114,17 @@ class ProxySandbox:
                 )
                 remote_writer.close()
             else:
-                # HTTP request - parse host from URL or headers
                 from urllib.parse import urlparse
                 parsed = urlparse(target)
                 host = parsed.hostname or ""
+                remote_port = parsed.port or 80
                 if not host:
-                    # Read Host header
                     while True:
                         line = (await asyncio.wait_for(reader.readline(), timeout=10)).decode("utf-8", errors="replace").strip()
                         if line.lower().startswith("host:"):
                             host = line[5:].strip().split(":")[0]
+                            if ":" in line[5:].strip():
+                                remote_port = int(line[5:].strip().split(":")[1])
                             break
                         if line == "":
                             break
@@ -128,10 +133,12 @@ class ProxySandbox:
                     await writer.drain()
                     logger.warning(f"Proxy BLOCKED HTTP: {host}")
                     return
-                # Forward to upstream
                 try:
-                    remote_reader, remote_writer = await asyncio.wait_for(
-                        asyncio.open_connection(host, parsed.port or 80), timeout=10
+                    remote_sock = await loop.run_in_executor(
+                        None, self._blocking_connect, host, remote_port
+                    )
+                    remote_reader, remote_writer = await asyncio.open_connection(
+                        sock=remote_sock
                     )
                 except Exception as e:
                     writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
@@ -152,6 +159,14 @@ class ProxySandbox:
                 writer.close()
             except Exception:
                 pass
+
+    @staticmethod
+    def _blocking_connect(host: str, port: int) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect((socket.getaddrinfo(host, port)[0][4][0], port))
+        sock.settimeout(300)
+        return sock
 
     async def _relay(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:

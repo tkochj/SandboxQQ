@@ -143,9 +143,8 @@ class ProcessSandbox:
 
                     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-                    attr_list_size = wintypes.DWORD(0)
-                    kernel32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(attr_list_size))
-                    buf = ctypes.create_string_buffer(attr_list_size.value)
+                    attr_list_size = wintypes.DWORD(256)
+                    buf = ctypes.create_string_buffer(256)
                     attr_list = ctypes.cast(buf, ctypes.c_void_p)
                     if not kernel32.InitializeProcThreadAttributeList(attr_list, 1, 0, ctypes.byref(attr_list_size)):
                         raise ctypes.WinError(ctypes.get_last_error())
@@ -189,16 +188,14 @@ class ProcessSandbox:
                                     ("lpAttributeList", ctypes.c_void_p)]
                     si = _STARTUPINFOEX()
                     si.StartupInfo.cb = ctypes.sizeof(_STARTUPINFOEX)
-                    si.lpAttributeList = ctypes.cast(attr_list, ctypes.c_void_p).value
+                    si.lpAttributeList = ctypes.addressof(buf)
                     cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
-                    # Convert env dict to null-terminated environment block
-                    env_block = "\0".join(f"{k}={v}" for k, v in process_env.items()) + "\0\0"
-                    env_ptr = ctypes.create_unicode_buffer(env_block)
                     pi = ctypes.create_string_buffer(24)
+                    # AppContainer requires NULL env block (inherit from parent)
                     if not kernel32.CreateProcessW(
                         None, cmd_line, None, None, False,
                         0x08000000 | 0x00000004,  # CREATE_NO_WINDOW | CREATE_SUSPENDED
-                        env_ptr, work_dir, ctypes.byref(si), pi,
+                        None, work_dir, ctypes.byref(si), pi,
                     ):
                         raise ctypes.WinError(ctypes.get_last_error())
 
