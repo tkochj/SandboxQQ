@@ -1,4 +1,4 @@
-﻿import os, sys, json, logging, subprocess, base64
+﻿import os, sys, json, logging, subprocess, base64, unicodedata
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from ai.config import ToolPermissions
@@ -80,6 +80,7 @@ class ReadFileTool(SandboxTool):
 
 _WRITE_BLOCKED_FILES = {"ai_config.json", "bot_config.json", "bot_profiles.json", "conversation_memory.json"}
 _WRITE_BLOCKED_EXT = (".py", ".exe", ".bat", ".ps1", ".dll", ".com", ".vbs", ".js")
+_DOT_CONF = dict.fromkeys(map(ord, "\u3002\uff0e\u2024\ufe52\uff61\u00b7\u2219"), ".")
 
 class WriteFileTool(SandboxTool):
     name = "write_file"; display_name = "写入文件"
@@ -92,7 +93,12 @@ class WriteFileTool(SandboxTool):
         ap = _resolve(sandbox_root, rp)
         if not ap: return f"错误: 路径超出沙盒: {rp}"
         fname = os.path.basename(ap).strip().rstrip(". ")
-        ext = os.path.splitext(fname)[1].lower()
+        # Reject control/format/combining chars (zero-width, dot confusables, etc.)
+        if any(unicodedata.category(c) in ("Cc", "Cf", "Mn") for c in fname):
+            return f"错误: 文件名含非法字符: {rp}"
+        # Map Unicode dot confusables -> ASCII period before extension check
+        fname_check = unicodedata.normalize("NFKC", fname).translate(_DOT_CONF)
+        ext = os.path.splitext(fname_check)[1].lower()
         if ext in _WRITE_BLOCKED_EXT:
             return f"错误: 不允许写入可执行文件: {rp}"
         if fname in _WRITE_BLOCKED_FILES:
