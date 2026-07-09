@@ -91,7 +91,7 @@ class WriteFileTool(SandboxTool):
         rp = kwargs.get("path","").strip(); content = kwargs.get("content","")
         ap = _resolve(sandbox_root, rp)
         if not ap: return f"错误: 路径超出沙盒: {rp}"
-        fname = os.path.basename(ap).strip()
+        fname = os.path.basename(ap).strip().rstrip(". ")
         ext = os.path.splitext(fname)[1].lower()
         if ext in _WRITE_BLOCKED_EXT:
             return f"错误: 不允许写入可执行文件: {rp}"
