@@ -32,8 +32,90 @@ class ExecutePythonTool(SandboxTool):
         code = kwargs.get("code",""); timeout = kwargs.get("timeout",30)
         if not code.strip(): return "错误: 代码不能为空"
         sp = os.path.join(sandbox_root,"_sandbox_script.py")
+        sr_escaped = sandbox_root.replace("\\", "\\\\")
+        sandbox_wrapper = f'''
+import builtins, os, sys
+from pathlib import Path
+
+_SANDBOX_ROOT = r"{sr_escaped}"
+
+def _sandbox_resolve(rel_path):
+    try:
+        root = Path(_SANDBOX_ROOT).resolve()
+        target = (root / rel_path).resolve()
+        target.relative_to(root)
+        return str(target)
+    except (ValueError, TypeError):
+        return None
+
+_dangerous_modules = {{"subprocess", "socket", "ctypes", "multiprocessing",
+                      "shutil", "pty", "fcntl", "resource", "syslog"}}
+_original_import = builtins.__import__
+
+def _safe_import(name, *args, **kwargs):
+    base = name.split(".")[0]
+    if base in _dangerous_modules:
+        raise ImportError(f"沙盒限制: 模块 '{{name}}' 被禁止导入")
+    return _original_import(name, *args, **kwargs)
+
+builtins.__import__ = _safe_import
+
+_original_open = builtins.open
+def _safe_open(file, mode="r", *args, **kwargs):
+    if isinstance(file, int):
+        raise PermissionError("沙盒限制: 不允许通过文件描述符打开文件")
+    safe_path = _sandbox_resolve(str(file))
+    if not safe_path:
+        if "w" in mode or "a" in mode or "x" in mode:
+            if not str(file).startswith("/") and not str(file).startswith(".."):
+                safe_path = _sandbox_resolve(str(file))
+        if not safe_path:
+            raise PermissionError(f"沙盒限制: 路径超出沙盒范围: {{file}}")
+    return _original_open(safe_path, mode, *args, **kwargs)
+builtins.open = _safe_open
+
+_os_dangerous = ["system", "popen", "execv", "execve", "spawnv", "spawnve",
+                 "kill", "killpg", "fork", "forkpty", "chroot", "setuid",
+                 "setgid", "seteuid", "setegid", "getuid", "geteuid",
+                 "getgid", "getegid", "getpid", "getppid", "getlogin",
+                 "uname", "sysconf"]
+for _fn in _os_dangerous:
+    if hasattr(os, _fn):
+        def _blocked(*args, _name=_fn, **kwargs):
+            raise PermissionError(f"沙盒限制: os.{{_name}} 被禁止")
+        setattr(os, _fn, _blocked)
+
+_orig_getcwd = os.getcwd
+def _safe_getcwd():
+    return _SANDBOX_ROOT
+os.getcwd = _safe_getcwd
+
+_orig_os_open = os.open
+def _safe_os_open(path, flags, mode=0o777, *, dir_fd=None):
+    if dir_fd is not None:
+        raise PermissionError("沙盒限制: 不支持dir_fd")
+    safe_path = _sandbox_resolve(str(path))
+    if not safe_path:
+        raise PermissionError(f"沙盒限制: 路径超出沙盒范围: {{path}}")
+    return _orig_os_open(safe_path, flags, mode)
+os.open = _safe_os_open
+
+_orig_os_listdir = os.listdir
+def _safe_os_listdir(path="."):
+    safe_path = _sandbox_resolve(str(path))
+    if not safe_path:
+        raise PermissionError(f"沙盒限制: 路径超出沙盒范围: {{path}}")
+    return _orig_os_listdir(safe_path)
+os.listdir = _safe_os_listdir
+
+def _chdir_blocked(*args, **kwargs):
+    raise PermissionError("沙盒限制: 禁止切换工作目录")
+os.chdir = _chdir_blocked
+
+# ===== 用户代码开始 =====
+'''
         try:
-            with open(sp,"w",encoding="utf-8") as f: f.write(code)
+            with open(sp,"w",encoding="utf-8") as f: f.write(sandbox_wrapper + "\n" + code)
             sm = getattr(self, '_sandbox_manager', None)
             if sm and sm.proc_sandbox:
                 proc = sm.proc_sandbox.spawn([sys.executable, sp], cwd=sandbox_root, capture_output=True)
@@ -111,7 +193,7 @@ class ListFilesTool(SandboxTool):
             return f"目录: {rp or '/'} ({len(entries)}项)\n"+"\n".join(entries) if entries else "(空目录)"
         except Exception as e: return f"列出失败: {e}"
 
-ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl"]
+ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl","wget","pip","npm","node","git"]
 
 class RunShellTool(SandboxTool):
     name = "run_shell"; display_name = "Shell命令"
