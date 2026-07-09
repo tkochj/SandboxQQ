@@ -105,9 +105,105 @@ class JobObjectManager:
             pass
 
 
+_SANDBOX_SID_NAME = "SandboxQQ_Container"
+
+
 class TokenManager:
     @staticmethod
+    def _get_appcontainer_sid():
+        """Create or retrieve the AppContainer SID via userenv!CreateAppContainerProfile."""
+        import ctypes
+        from ctypes import wintypes
+
+        userenv = ctypes.WinDLL("userenv")
+        CreateAppContainerProfile = userenv.CreateAppContainerProfile
+        CreateAppContainerProfile.restype = wintypes.HRESULT
+        CreateAppContainerProfile.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+            ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.PSID),
+        ]
+
+        name = _SANDBOX_SID_NAME
+        sid_ptr = wintypes.PSID()
+        hr = CreateAppContainerProfile(
+            name, "SandboxQQ Container", "SandboxQQ AppContainer isolation",
+            None, 0, ctypes.byref(sid_ptr),
+        )
+        if hr != 0:  # S_OK
+            # Already exists — derive SID from name
+            from ctypes import wintypes as w
+            kernel32 = ctypes.WinDLL("kernel32")
+            DeriveAppContainerSidFromAppContainerName = kernel32.DeriveAppContainerSidFromAppContainerName
+            DeriveAppContainerSidFromAppContainerName.restype = wintypes.BOOL
+            DeriveAppContainerSidFromAppContainerName.argtypes = [
+                wintypes.LPCWSTR, ctypes.POINTER(wintypes.PSID),
+            ]
+            if not DeriveAppContainerSidFromAppContainerName(name, ctypes.byref(sid_ptr)):
+                logger.warning("DeriveAppContainerSidFromAppContainerName failed")
+                return None
+        return sid_ptr
+
+    @staticmethod
+    def _ensure_container_profile(sandbox_root: str):
+        """Grant AppContainer full access to sandbox root; deny system dirs."""
+        try:
+            import subprocess
+            import win32security
+
+            sandbox_root = os.path.abspath(sandbox_root)
+            Path(sandbox_root).mkdir(parents=True, exist_ok=True)
+
+            sid_ptr = TokenManager._get_appcontainer_sid()
+            if not sid_ptr:
+                logger.warning("Cannot get AppContainer SID for ACL")
+                return None
+            sid_str = win32security.ConvertSidToStringSid(sid_ptr)
+
+            subprocess.run(
+                ["icacls", sandbox_root, "/grant", f"{sid_str}:(OI)(CI)F", "/T", "/Q"],
+                capture_output=True, timeout=30,
+            )
+
+            system_dirs = [
+                os.environ.get("SYSTEMROOT", "C:\\Windows"),
+                os.environ.get("USERPROFILE", "C:\\Users"),
+                os.environ.get("APPDATA", ""), os.environ.get("LOCALAPPDATA", ""),
+                os.environ.get("TEMP", ""), os.environ.get("TMP", ""),
+                "C:\\Program Files", "C:\\Program Files (x86)",
+            ]
+            deny_script = ""
+            for d in system_dirs:
+                if d and os.path.exists(d):
+                    deny_script += f"icacls \"{d}\" /deny \"{sid_str}:(RX,W,AD,DC)\" /T /Q 2>nul & "
+            subprocess.run(deny_script, shell=True, capture_output=True, timeout=60)
+
+            logger.info(f"AppContainer profile ACL set for {sandbox_root}")
+            return sid_ptr
+        except Exception as e:
+            logger.warning(f"Failed to set up container ACL: {e}")
+            return None
+
+    @staticmethod
+    def get_container_sandbox(sandbox_root: str):
+        """Public entry point: ensure AppContainer profile + ACL, return (sid_ptr, appcontainer_token)."""
+        if not HAS_PYWIN32:
+            logger.warning("pywin32 missing, cannot create AppContainer token")
+            return None
+
+        try:
+            sid_ptr = TokenManager._ensure_container_profile(sandbox_root)
+            if not sid_ptr:
+                logger.warning("AppContainer profile creation failed")
+                return None
+            logger.info(f"AppContainer ready for {sandbox_root}")
+            return sid_ptr
+        except Exception as e:
+            logger.warning(f"Failed to create AppContainer: {e}")
+            return None
+
+    @staticmethod
     def create_restricted_token():
+        """Fallback: create a restricted token without AppContainer."""
         if not HAS_PYWIN32:
             return None
         try:
@@ -119,13 +215,7 @@ class TokenManager:
                 win32con.TOKEN_ADJUST_GROUPS
             )
 
-            restricted = win32security.CreateRestrictedToken(
-                token,
-                0,
-                [],
-                [],
-                [],
-            )
+            restricted = win32security.CreateRestrictedToken(token, 0, [], [], [])
 
             try:
                 low_sid = win32security.CreateWellKnownSid(
@@ -133,13 +223,9 @@ class TokenManager:
                 )
                 label = win32security.TOKEN_MANDATORY_LABEL()
                 label.Label.Sid = low_sid
-                label.Label.Attributes = (
-                    win32security.SE_GROUP_INTEGRITY
-                )
+                label.Label.Attributes = win32security.SE_GROUP_INTEGRITY
                 win32security.SetTokenInformation(
-                    restricted,
-                    win32security.TokenIntegrityLevel,
-                    label
+                    restricted, win32security.TokenIntegrityLevel, label
                 )
             except Exception:
                 pass

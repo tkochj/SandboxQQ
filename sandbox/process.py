@@ -45,6 +45,18 @@ class ProcessSandbox:
         self.max_processes = max_processes
         self._processes: Dict[int, SandboxedProcess] = {}
         self._lock = threading.Lock()
+        self._appcontainer_sid = None
+        if self.sandbox_root and HAS_PYWIN32:
+            try:
+                from utils.win32_utils import TokenManager
+                sid_ptr = TokenManager.get_container_sandbox(str(self.sandbox_root))
+                self._appcontainer_sid = sid_ptr
+                if sid_ptr:
+                    logger.info(f"AppContainer SID obtained for {self.sandbox_root}")
+                else:
+                    logger.warning("AppContainer not available, falling back to restricted token")
+            except Exception as e:
+                logger.warning(f"AppContainer init failed: {e}")
 
     def set_proxy_url(self, proxy_url: str):
         self._proxy_url = proxy_url
@@ -76,7 +88,79 @@ class ProcessSandbox:
             process_env["https_proxy"] = proxy
 
         proc = None
-        if self.restricted_token and HAS_PYWIN32:
+        if self._appcontainer_sid and HAS_PYWIN32:
+            try:
+                import ctypes
+                from ctypes import wintypes
+                import win32process, win32api, win32security
+
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+                # Size calc
+                attr_list_size = wintypes.DWORD(0)
+                kernel32.InitializeProcThreadAttributeList(
+                    None, 1, 0, ctypes.byref(attr_list_size)
+                )
+                buf = ctypes.create_string_buffer(attr_list_size.value)
+                attr_list = ctypes.cast(buf, ctypes.c_void_p)
+                if not kernel32.InitializeProcThreadAttributeList(
+                    attr_list, 1, 0, ctypes.byref(attr_list_size)
+                ):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+                sec_caps = (ctypes.c_ubyte * 24)()  # SECURITY_CAPABILITIES: 4+4+4+4+4+4 = 24 bytes
+                ctypes.memset(sec_caps, 0, 24)
+                ctypes.memmove(sec_caps, ctypes.byref(wintypes.DWORD(1)), 4)  # AppContainerSidPresent = TRUE
+                ctypes.memmove(ctypes.byref(sec_caps, 4), ctypes.byref(wintypes.PSID(self._appcontainer_sid)), 8)  # sid pointer
+
+                if not kernel32.UpdateProcThreadAttribute(
+                    attr_list, 0, 0x20007,  # PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES
+                    ctypes.byref(sec_caps), ctypes.sizeof(sec_caps), None, None,
+                ):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+                si = win32process.STARTUPINFOEX()
+                si.StartupInfo.cb = ctypes.sizeof(type(si))
+                si.lpAttributeList = attr_list
+
+                cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
+                pi = ctypes.create_string_buffer(24)  # PROCESS_INFORMATION
+                if not kernel32.CreateProcessW(
+                    None, cmd_line, None, None, False,
+                    0x08000000 | 0x00000004 | 0x00000010,  # EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NEW_CONSOLE
+                    process_env, work_dir, ctypes.byref(si), pi,
+                ):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+                pi_fields = ctypes.cast(pi, ctypes.POINTER(ctypes.c_void_p * 4))
+                h_process = ctypes.c_void_p(pi_fields[0][0]).value
+                h_thread = ctypes.c_void_p(pi_fields[0][1]).value
+                pid = pi_fields[0][2]
+                kernel32.ResumeThread(h_thread)
+                import psutil
+                proc_psutil = psutil.Process(pid)
+                class _SandboxedProc:
+                    def __init__(self, psutil_proc, pid_val):
+                        self._proc = psutil_proc
+                        self.pid = pid_val
+                        self.stdout = None
+                        self.stderr = None
+                        self.returncode = None
+                    def communicate(self, timeout=None):
+                        try:
+                            self.returncode = self._proc.wait(timeout=timeout)
+                        except psutil.TimeoutExpired:
+                            raise subprocess.TimeoutExpired(self._proc.cmdline(), timeout)
+                        return (b"", b"")
+                    def kill(self):
+                        self._proc.kill()
+                proc = _SandboxedProc(proc_psutil, pid)
+                logger.info(f"Spawned in AppContainer: PID {pid}")
+            except Exception as e:
+                logger.warning(f"AppContainer launch failed, fallback: {e}")
+                proc = None
+
+        if not proc and self.restricted_token and HAS_PYWIN32:
             try:
                 import win32process, win32security, win32api
                 cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
@@ -91,7 +175,6 @@ class ProcessSandbox:
                 win32process.ResumeThread(thread_handle)
                 import psutil
                 proc_psutil = psutil.Process(pid)
-                # Wrap as a Popen-compatible object for the caller
                 class _SandboxedProc:
                     def __init__(self, psutil_proc, pid_val):
                         self._proc = psutil_proc
