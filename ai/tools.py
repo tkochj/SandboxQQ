@@ -32,14 +32,8 @@ class ExecutePythonTool(SandboxTool):
         code = kwargs.get("code",""); timeout = kwargs.get("timeout",30)
         if not code.strip(): return "错误: 代码不能为空"
         sp = os.path.join(sandbox_root,"_sandbox_script.py")
-        sandbox_wrapper = '''
-# 沙盒由 Windows AppContainer 内核级隔离保护
-# 子进程以受限令牌运行，ACL 限制只能读写沙盒目录
-# 所有 Python 层面的绕过尝试会被 OS 内核拒绝
-# ===== 用户代码开始 =====
-'''
         try:
-            with open(sp,"w",encoding="utf-8") as f: f.write(sandbox_wrapper + "\n" + code)
+            with open(sp,"w",encoding="utf-8") as f: f.write(code)
             sm = getattr(self, '_sandbox_manager', None)
             if sm and sm.proc_sandbox:
                 proc = sm.proc_sandbox.spawn([sys.executable, sp], cwd=sandbox_root, capture_output=True)

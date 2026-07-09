@@ -1,8 +1,10 @@
 import os
+import sys
 import logging
 import psutil
 
 logger = logging.getLogger(__name__)
+IS_WINDOWS = sys.platform == "win32"
 
 try:
     import win32job
@@ -145,8 +147,9 @@ class TokenManager:
 
     @staticmethod
     def _ensure_container_profile(sandbox_root: str):
-        """Grant AppContainer full access to sandbox root; deny system dirs."""
+        """Grant AppContainer full access to sandbox root; deny access to sensitive system dirs."""
         try:
+            import string as _string_mod
             import subprocess
             import win32security
 
@@ -159,23 +162,45 @@ class TokenManager:
                 return None
             sid_str = win32security.ConvertSidToStringSid(sid_ptr)
 
+            # Grant full access to sandbox directory
             subprocess.run(
                 ["icacls", sandbox_root, "/grant", f"{sid_str}:(OI)(CI)F", "/T", "/Q"],
                 capture_output=True, timeout=30,
             )
 
-            system_dirs = [
+            # Deny sensitive directories
+            user_profile = os.environ.get("USERPROFILE", "")
+            deny_dirs = [
                 os.environ.get("SYSTEMROOT", "C:\\Windows"),
-                os.environ.get("USERPROFILE", "C:\\Users"),
-                os.environ.get("APPDATA", ""), os.environ.get("LOCALAPPDATA", ""),
-                os.environ.get("TEMP", ""), os.environ.get("TMP", ""),
-                "C:\\Program Files", "C:\\Program Files (x86)",
+                os.environ.get("APPDATA", ""),
+                os.environ.get("LOCALAPPDATA", ""),
+                os.environ.get("TEMP", ""),
+                os.environ.get("TMP", ""),
+                "C:\\Program Files",
+                "C:\\Program Files (x86)",
+                "C:\\ProgramData",
             ]
+            # Add specific user subdirectories (not whole Users root — preserves AppContainer profile)
+            if user_profile:
+                for sub in ["Documents", "Desktop", "Downloads", "Pictures", "Videos", "Music", "Favorites", "Contacts"]:
+                    deny_dirs.append(os.path.join(user_profile, sub))
+                deny_dirs.append(os.path.join(os.path.dirname(user_profile), "Public"))
+            # Add all fixed drive roots
+            if IS_WINDOWS:
+                import ctypes
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                buf = ctypes.create_unicode_buffer(260)
+                for letter in _string_mod.ascii_uppercase:
+                    root = f"{letter}:\\"
+                    if kernel32.GetDriveTypeW(root) == 3:  # DRIVE_FIXED
+                        deny_dirs.append(root)
+
             deny_script = ""
-            for d in system_dirs:
+            for d in set(deny_dirs):
                 if d and os.path.exists(d):
-                    deny_script += f"icacls \"{d}\" /deny \"{sid_str}:(RX,W,AD,DC)\" /T /Q 2>nul & "
-            subprocess.run(deny_script, shell=True, capture_output=True, timeout=60)
+                    deny_script += f"icacls \"{d}\" /deny \"{sid_str}:(RX,W,AD,DC,DE)\" /T /Q 2>nul & "
+            if deny_script:
+                subprocess.run(deny_script, shell=True, capture_output=True, timeout=60)
 
             logger.info(f"AppContainer profile ACL set for {sandbox_root}")
             return sid_ptr
