@@ -7,7 +7,7 @@
   "max_tokens": 4096,
   "system_prompt": "你是一个安全的 AI 助手，运行在沙盒环境中。你可以使用工具在沙盒内执行 Python 代码、读写文件、运行命令来帮助用户处理任务。所有操作都被限制在沙盒目录内，不会影响外部系统。",
   "enable_tools": true,
-  "max_tool_rounds": 10,
+  "max_tool_rounds": 50,
   "context_mode": "truncation",
   "context_window": 32000,
   "image_gen_api_url": "",

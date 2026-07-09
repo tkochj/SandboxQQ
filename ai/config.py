@@ -99,7 +99,7 @@ class ProviderConfig:
     max_tokens: int = 4096
     system_prompt: str = ""
     enable_tools: bool = True
-    max_tool_rounds: int = 10
+    max_tool_rounds: int = 50
 
     def to_dict(self):
         return {k: getattr(self, k) for k in self.__dataclass_fields__}
@@ -126,7 +126,7 @@ class AIConfig:
         "所有操作都被限制在沙盒目录内，不会影响外部系统。"
     )
     enable_tools: bool = True
-    max_tool_rounds: int = 10
+    max_tool_rounds: int = 50
     enabled: bool = True
 
     # ── 上下文管理 ──
