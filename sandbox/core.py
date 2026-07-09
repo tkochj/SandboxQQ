@@ -215,9 +215,13 @@ class SandboxManager:
                         proxy_thread.start()
                         import time
                         time.sleep(0.2)
-                        if self.proxy_sandbox.proxy_url and self.proc_sandbox:
-                            self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
-                            logger.info(f"Subprocess proxy: {self.proxy_sandbox.proxy_url}")
+                        if self.proxy_sandbox.proxy_url:
+                            if self.proc_sandbox:
+                                self.proc_sandbox.set_proxy_url(self.proxy_sandbox.proxy_url)
+                            # Also set main-process env so ALL httpx/aiohttp clients use the proxy
+                            os.environ["HTTP_PROXY"] = self.proxy_sandbox.proxy_url
+                            os.environ["HTTPS_PROXY"] = self.proxy_sandbox.proxy_url
+                            logger.info(f"Process-wide proxy: {self.proxy_sandbox.proxy_url}")
                     except Exception as e:
                         logger.warning(f"Proxy init failed (non-fatal): {e}")
 

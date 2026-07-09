@@ -109,7 +109,7 @@ class ListFilesTool(SandboxTool):
             return f"目录: {rp or '/'} ({len(entries)}项)\n"+"\n".join(entries) if entries else "(空目录)"
         except Exception as e: return f"列出失败: {e}"
 
-ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","whoami","ver","systeminfo","ipconfig","ping","tracert","netstat","nslookup","curl","wget","pip","npm","node","git"]
+ALLOWED_SHELL_COMMANDS = ["echo","dir","type","find","findstr","more","tree","where","ver"]
 
 class RunShellTool(SandboxTool):
     name = "run_shell"; display_name = "Shell命令"
@@ -162,9 +162,10 @@ class GenerateImageTool(SandboxTool):
         if not self.config or not self.config.image_gen_api_key:
             return "错误: 未配置图片生成API"
         import httpx, aiohttp, uuid
+        pu = getattr(self, '_proxy_url', '') or None
         try:
             url = f"{self.config.image_gen_api_url.rstrip('/')}/images/generations"
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
                 resp = await client.post(url, json={"model":self.config.image_gen_model or "dall-e-3","prompt":prompt,"n":1,"size":size},
                     headers={"Authorization":f"Bearer {self.config.image_gen_api_key}","Content-Type":"application/json"})
             data = resp.json()
@@ -174,7 +175,7 @@ class GenerateImageTool(SandboxTool):
                 local = os.path.join(sandbox_root, f"gen_img_{uuid.uuid4().hex}{ext}")
                 try:
                     async with aiohttp.ClientSession() as sess:
-                        async with sess.get(img_url, timeout=30) as r:
+                        async with sess.get(img_url, timeout=30, proxy=pu) as r:
                             if r.status == 200:
                                 with open(local, "wb") as f:
                                     f.write(await r.read())
@@ -206,11 +207,12 @@ class AnalyzeImageTool(SandboxTool):
             data_url = f"data:{mime};base64,{b64}"
             if self.config and self.config.vision_api_key:
                 import httpx
+                pu = getattr(self, '_proxy_url', '') or None
                 api_url = (self.config.vision_api_url or self.config.api_url).rstrip("/") + "/chat/completions"
                 api_key = self.config.vision_api_key or self.config.api_key
                 model = self.config.vision_model or self.config.model
                 payload = {"model":model,"messages":[{"role":"user","content":[{"type":"text","text":question},{"type":"image_url","image_url":{"url":data_url}}]}],"max_tokens":1024}
-                async with httpx.AsyncClient(timeout=60) as client:
+                async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
                     resp = await client.post(api_url, json=payload,
                         headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"})
                     resp.raise_for_status()
@@ -236,9 +238,10 @@ class GenerateVideoTool(SandboxTool):
         if not self.config or not self.config.video_gen_api_key:
             return "错误: 未配置视频生成API"
         import httpx
+        pu = getattr(self, '_proxy_url', '') or None
         try:
             url = f"{self.config.video_gen_api_url.rstrip('/')}/video/generations"
-            async with httpx.AsyncClient(timeout=120) as client:
+            async with httpx.AsyncClient(timeout=120, proxies=pu) as client:
                 resp = await client.post(url, json={"model":self.config.video_gen_model or "default","prompt":prompt,"duration":duration},
                     headers={"Authorization":f"Bearer {self.config.video_gen_api_key}","Content-Type":"application/json"})
             data = resp.json()
@@ -254,12 +257,13 @@ class WebDownloadTool(SandboxTool):
     async def run(self, sandbox_root: str, **kwargs) -> str:
         url = kwargs.get("url",""); save_path = kwargs.get("save_path","")
         import aiohttp, uuid
+        pu = getattr(self, '_proxy_url', '') or None
         fname = save_path or os.path.basename(url.split("?")[0]) or f"download_{uuid.uuid4().hex}"
         ap = _resolve(sandbox_root, fname) if not save_path else _resolve(sandbox_root, save_path)
         if not ap: return f"错误: 路径超出沙盒"
         try:
             async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=60) as r:
+                async with sess.get(url, timeout=60, proxy=pu) as r:
                     if r.status != 200: return f"下载失败: HTTP {r.status}"
                     with open(ap,"wb") as f:
                         f.write(await r.read())
@@ -350,8 +354,9 @@ class WebSearchTool(SandboxTool):
         query = kwargs.get("query","")
         if not query: return "错误: 搜索词不能为空"
         import httpx
+        pu = getattr(self, '_proxy_url', '') or None
         try:
-            async with httpx.AsyncClient(timeout=15) as c:
+            async with httpx.AsyncClient(timeout=15, proxies=pu) as c:
                 r = await c.get(f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1")
                 data = r.json()
                 results = []
@@ -413,7 +418,8 @@ class TranslateTool(SandboxTool):
         if not text: return "错误: 文本不能为空"
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=15) as c:
+            pu = getattr(self, '_proxy_url', '') or None
+            async with httpx.AsyncClient(timeout=15, proxies=pu) as c:
                 resp = await c.post("https://api.mymemory.translated.net/get", data={"q": text, "langpair": f"auto|{target}"})
                 data = resp.json()
                 return data.get("responseData", {}).get("translatedText", "") or "(翻译失败)"
@@ -612,6 +618,12 @@ def set_tool_config(config, sandbox_manager=None):
     for t in TOOL_REGISTRY:
         t.config = config
         t._sandbox_manager = sandbox_manager
+        # Expose proxy URL for tools that make HTTP requests from the main process
+        t._proxy_url = (
+            sandbox_manager.proxy_sandbox.proxy_url
+            if sandbox_manager and getattr(sandbox_manager, 'proxy_sandbox', None)
+            else ""
+        )
 
 def _resolve(sandbox_root: str, rel_path: str) -> Optional[str]:
     root = Path(sandbox_root).resolve()
