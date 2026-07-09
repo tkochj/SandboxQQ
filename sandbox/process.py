@@ -69,13 +69,10 @@ class ProcessSandbox:
     def __init__(
         self,
         job_manager,
-        restricted_token=None,
         sandbox_root: str = "",
         max_processes: int = 10,
-        allow_insecure_fallback: bool = False,
     ):
         self.job_manager = job_manager
-        self.restricted_token = restricted_token
         self.sandbox_root = Path(sandbox_root).resolve() if sandbox_root else None
         self.max_processes = max_processes
         self._processes: Dict[int, SandboxedProcess] = {}
@@ -100,22 +97,11 @@ class ProcessSandbox:
             if HAS_DOCKER:
                 self._isolation_ready = True
                 logger.info("Linux isolation: Docker available")
-            elif allow_insecure_fallback:
-                logger.warning("Linux isolation: Docker not found, running without container isolation")
-                self._isolation_ready = True
             else:
-                raise RuntimeError(
-                    "沙盒隔离初始化失败：Linux 下需要 Docker 来隔离子进程。"
-                    "请安装 Docker 或设置 allow_insecure_fallback=True"
-                )
+                raise RuntimeError("沙盒隔离初始化失败：Linux 下需要 Docker 来隔离子进程")
 
         else:
-            # macOS / other — always require explicit fallback
-            if allow_insecure_fallback:
-                self._isolation_ready = True
-                logger.warning(f"No isolation available on {self._platform}, running insecure")
-            else:
-                raise RuntimeError(f"平台 {self._platform} 不支持沙盒隔离，请设置 allow_insecure_fallback=True")
+            raise RuntimeError(f"平台 {self._platform} 不支持沙盒隔离")
 
     def set_proxy_url(self, proxy_url: str):
         self._proxy_url = proxy_url
@@ -164,19 +150,46 @@ class ProcessSandbox:
                     if not kernel32.InitializeProcThreadAttributeList(attr_list, 1, 0, ctypes.byref(attr_list_size)):
                         raise ctypes.WinError(ctypes.get_last_error())
 
-                    # SECURITY_CAPABILITIES: PSID(8) + PSID_AND_ATTRIBUTES*(8) + DWORD(4) + DWORD(4) = 24
-                    sec_caps = (ctypes.c_ubyte * 24)()
-                    ctypes.memset(sec_caps, 0, 24)
-                    ctypes.memmove(sec_caps, ctypes.byref(wintypes.PSID(self._appcontainer_sid)), 8)
+                    # SECURITY_CAPABILITIES structure (16 bytes on x64)
+                    class SECURITY_CAPABILITIES(ctypes.Structure):
+                        _fields_ = [("CapabilitySid", ctypes.c_void_p),
+                                    ("CapabilityCount", wintypes.DWORD),
+                                    ("Reserved", wintypes.DWORD)]
+                    sec_caps = SECURITY_CAPABILITIES(
+                        CapabilitySid=self._appcontainer_sid.value if self._appcontainer_sid else 0,
+                        CapabilityCount=0, Reserved=0)
 
                     if not kernel32.UpdateProcThreadAttribute(
                         attr_list, 0, 0x20007, ctypes.byref(sec_caps), ctypes.sizeof(sec_caps), None, None,
                     ):
                         raise ctypes.WinError(ctypes.get_last_error())
 
-                    si = win32process.STARTUPINFOEX()
-                    si.StartupInfo.cb = ctypes.sizeof(type(si))
-                    si.lpAttributeList = attr_list
+                    # STARTUPINFOEX (pywin32 may lack this type)
+                    class _STARTUPINFOW(ctypes.Structure):
+                        _fields_ = [("cb", wintypes.DWORD),
+                                    ("lpReserved", wintypes.LPWSTR),
+                                    ("lpDesktop", wintypes.LPWSTR),
+                                    ("lpTitle", wintypes.LPWSTR),
+                                    ("dwX", wintypes.DWORD),
+                                    ("dwY", wintypes.DWORD),
+                                    ("dwXSize", wintypes.DWORD),
+                                    ("dwYSize", wintypes.DWORD),
+                                    ("dwXCountChars", wintypes.DWORD),
+                                    ("dwYCountChars", wintypes.DWORD),
+                                    ("dwFillAttribute", wintypes.DWORD),
+                                    ("dwFlags", wintypes.DWORD),
+                                    ("wShowWindow", wintypes.WORD),
+                                    ("cbReserved2", wintypes.WORD),
+                                    ("lpReserved2", ctypes.c_void_p),
+                                    ("hStdInput", ctypes.c_void_p),
+                                    ("hStdOutput", ctypes.c_void_p),
+                                    ("hStdError", ctypes.c_void_p)]
+                    class _STARTUPINFOEX(ctypes.Structure):
+                        _fields_ = [("StartupInfo", _STARTUPINFOW),
+                                    ("lpAttributeList", ctypes.c_void_p)]
+                    si = _STARTUPINFOEX()
+                    si.StartupInfo.cb = ctypes.sizeof(_STARTUPINFOEX)
+                    si.lpAttributeList = ctypes.cast(attr_list, ctypes.c_void_p).value
                     cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
                     # Convert env dict to null-terminated environment block
                     env_block = "\0".join(f"{k}={v}" for k, v in process_env.items()) + "\0\0"
@@ -199,27 +212,8 @@ class ProcessSandbox:
                     logger.warning(f"AppContainer launch failed: {e}")
                     proc = None
 
-            if not proc and self.restricted_token:
-                try:
-                    import win32process, win32security, win32api
-                    cmd_line = cmd if isinstance(cmd, str) else subprocess.list2cmdline(cmd)
-                    sa = win32process.STARTUPINFO()
-                    h_process = win32process.CreateProcessAsUser(
-                        self.restricted_token, None, cmd_line,
-                        None, None, False,
-                        win32process.CREATE_SUSPENDED | win32process.CREATE_NEW_CONSOLE,
-                        process_env, work_dir, sa,
-                    )
-                    proc_handle, thread_handle, pid, tid = h_process
-                    win32process.ResumeThread(thread_handle)
-                    proc = _SandboxedProc(psutil.Process(pid), pid)
-                    logger.info(f"Spawned with restricted token: PID {pid}")
-                except Exception as e:
-                    logger.warning(f"Restricted token launch failed: {e}")
-                    proc = None
-
             if not proc:
-                logger.error("Windows 沙盒隔离失败: AppContainer 和受限令牌均不可用，拒绝执行")
+                logger.error("Windows 沙盒隔离失败: AppContainer 启动失败，拒绝执行")
                 return None
 
         elif IS_LINUX and HAS_DOCKER:
@@ -258,7 +252,7 @@ class ProcessSandbox:
                 return None
 
         else:
-            # macOS / other — 拒绝执行（allow_insecure_fallback 未设置）
+            # macOS / other — 拒绝执行
             logger.error(f"平台 {self._platform} 无可用沙盒隔离，拒绝执行")
             return None
 

@@ -175,14 +175,8 @@ class SandboxManager:
                         active_process_limit=self.config.active_process_limit,
                         memory_limit_mb=self.config.memory_limit_mb)
 
-                    if HAS_PYWIN32:
-                        restricted_token = TokenManager.create_restricted_token()
-                    else:
-                        restricted_token = None
-
                     self.proc_sandbox = ProcessSandbox(
                         self.job_manager,
-                        restricted_token,
                         root_dir,
                         self.config.active_process_limit,
                     )

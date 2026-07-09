@@ -136,14 +136,14 @@ class TokenManager:
             None, 0, ctypes.byref(sid_ptr),
         )
         if hr != 0:  # S_OK
-            # Already exists — derive SID from name
-            kernel32 = ctypes.WinDLL("kernel32")
-            DeriveAppContainerSidFromAppContainerName = kernel32.DeriveAppContainerSidFromAppContainerName
+            # Already exists — derive SID from name (returns FALSE but writes sid_ptr)
+            DeriveAppContainerSidFromAppContainerName = userenv.DeriveAppContainerSidFromAppContainerName
             DeriveAppContainerSidFromAppContainerName.restype = wintypes.BOOL
             DeriveAppContainerSidFromAppContainerName.argtypes = [
                 wintypes.LPCWSTR, ctypes.POINTER(PSID),
             ]
-            if not DeriveAppContainerSidFromAppContainerName(name, ctypes.byref(sid_ptr)):
+            DeriveAppContainerSidFromAppContainerName(name, ctypes.byref(sid_ptr))
+            if not sid_ptr or not sid_ptr.value:
                 logger.warning("DeriveAppContainerSidFromAppContainerName failed")
                 return None
         return sid_ptr
@@ -266,39 +266,6 @@ class TokenManager:
             return ""
 
     @staticmethod
-    def create_restricted_token():
-        """Fallback: create a restricted token without AppContainer."""
-        if not HAS_PYWIN32:
-            return None
-        try:
-            token = win32security.OpenProcessToken(
-                win32api.GetCurrentProcess(),
-                win32con.TOKEN_DUPLICATE | win32con.TOKEN_ASSIGN_PRIMARY |
-                win32con.TOKEN_QUERY | win32con.TOKEN_ADJUST_DEFAULT |
-                win32con.TOKEN_ADJUST_SESSIONID | win32con.TOKEN_ADJUST_PRIVILEGES |
-                win32con.TOKEN_ADJUST_GROUPS
-            )
-
-            restricted = win32security.CreateRestrictedToken(token, 0, [], [], [])
-
-            try:
-                low_sid = win32security.CreateWellKnownSid(
-                    win32security.WinLowLabelSid, None
-                )
-                label = win32security.TOKEN_MANDATORY_LABEL()
-                label.Label.Sid = low_sid
-                label.Label.Attributes = win32security.SE_GROUP_INTEGRITY
-                win32security.SetTokenInformation(
-                    restricted, win32security.TokenIntegrityLevel, label
-                )
-            except Exception:
-                pass
-
-            return restricted
-        except Exception as e:
-            logger.warning(f"Failed to create restricted token: {e}")
-            return None
-
     @staticmethod
     def get_low_integrity_token():
-        return TokenManager.create_restricted_token()
+        return None
