@@ -88,10 +88,10 @@ class WriteFileTool(SandboxTool):
     parameters = {"type":"object","properties":{"path":{"type":"string","description":"文件路径(相对沙盒根目录)"},"content":{"type":"string","description":"文件内容"}},"required":["path","content"]}
 
     async def run(self, sandbox_root: str, **kwargs) -> str:
-        rp = kwargs.get("path",""); content = kwargs.get("content","")
+        rp = kwargs.get("path","").strip(); content = kwargs.get("content","")
         ap = _resolve(sandbox_root, rp)
         if not ap: return f"错误: 路径超出沙盒: {rp}"
-        fname = os.path.basename(ap)
+        fname = os.path.basename(ap).strip()
         ext = os.path.splitext(fname)[1].lower()
         if ext in _WRITE_BLOCKED_EXT:
             return f"错误: 不允许写入可执行文件: {rp}"
