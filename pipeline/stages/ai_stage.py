@@ -186,7 +186,7 @@ class AIResponseStage(Stage):
                             yield
                             return
 
-        max_rounds = pc.max_tool_rounds or config.max_tool_rounds or 10
+        max_rounds = max(pc.max_tool_rounds or 0, config.max_tool_rounds or 0, 10)
         enable_tools = pc.enable_tools or config.enable_tools
 
         provider = self._provider_manager.get_or_create(config, pc if pc and pc.name != "default" else None)
