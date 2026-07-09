@@ -1076,8 +1076,9 @@ class MainWindow(QMainWindow):
         self.chk_net_iso.setChecked(True)
         iso_layout.addWidget(self.chk_net_iso, 0, 1)
 
-        self.chk_proc_iso = QCheckBox("进程隔离 (Job Object)")
+        self.chk_proc_iso = QCheckBox("进程隔离 (AppContainer)")
         self.chk_proc_iso.setChecked(True)
+        self.chk_proc_iso.stateChanged.connect(lambda s: self.chk_proc_iso.setChecked(True) if s == 0 else None)
         iso_layout.addWidget(self.chk_proc_iso, 0, 2)
 
         layout.addWidget(isolation_box)
@@ -1570,7 +1571,7 @@ class MainWindow(QMainWindow):
         self.sandbox.config.memory_limit_mb = self.dash_spin_mem.value()
         self.sandbox.config.enable_file_isolation = self.chk_file_iso.isChecked()
         self.sandbox.config.enable_network_isolation = self.chk_net_iso.isChecked()
-        self.sandbox.config.enable_process_isolation = self.chk_proc_iso.isChecked()
+        self.sandbox.config.enable_process_isolation = self.chk_proc_iso.isChecked()  # always True, checkbox is locked
 
         if self.sandbox.start(root):
             if self.sandbox.fs_sandbox:

@@ -35,21 +35,18 @@ class ExecutePythonTool(SandboxTool):
         try:
             with open(sp,"w",encoding="utf-8") as f: f.write(code)
             sm = getattr(self, '_sandbox_manager', None)
-            if sm and sm.proc_sandbox:
-                proc = sm.proc_sandbox.spawn([sys.executable, sp], cwd=sandbox_root, capture_output=True)
-                if not proc:
-                    return "错误: 沙盒拒绝执行"
-                try:
-                    stdout, stderr = proc.communicate(timeout=timeout)
-                    rcode = proc.returncode
-                except subprocess.TimeoutExpired:
-                    sm.proc_sandbox.kill(proc.pid)
-                    return f"错误: 超时({timeout}秒)"
-                out = (stdout or "") + (("[STDERR]\n"+stderr) if stderr else "") + (("\n[退出码: "+str(rcode)+"]") if rcode else "")
-            else:
-                safe_env = {"PATH": os.environ.get("PATH", ""), "SANDBOX_ROOT": sandbox_root}
-                r = subprocess.run([sys.executable,sp],cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,env=safe_env)
-                out = (r.stdout or "") + (("[STDERR]\n"+r.stderr) if r.stderr else "") + (("\n[退出码: "+str(r.returncode)+"]") if r.returncode else "")
+            if not sm or not sm.proc_sandbox:
+                return "错误: 沙盒未启动或无进程隔离，拒绝执行"
+            proc = sm.proc_sandbox.spawn([sys.executable, sp], cwd=sandbox_root, capture_output=True)
+            if not proc:
+                return "错误: 沙盒拒绝执行"
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+                rcode = proc.returncode
+            except subprocess.TimeoutExpired:
+                sm.proc_sandbox.kill(proc.pid)
+                return f"错误: 超时({timeout}秒)"
+            out = (stdout or "") + (("[STDERR]\n"+stderr) if stderr else "") + (("\n[退出码: "+str(rcode)+"]") if rcode else "")
             return out.strip() or "(无输出)"
         except subprocess.TimeoutExpired: return f"错误: 超时({timeout}秒)"
         except Exception as e: return f"执行错误: {e}"
@@ -135,19 +132,17 @@ class RunShellTool(SandboxTool):
             return f"错误: 命令 '{base}' 不在白名单中。允许: {', '.join(ALLOWED_SHELL_COMMANDS)}"
         try:
             sm = getattr(self, '_sandbox_manager', None)
-            if sm and sm.proc_sandbox:
-                proc = sm.proc_sandbox.spawn(parts, cwd=sandbox_root, capture_output=True, shell=False)
-                if not proc:
-                    return "错误: 沙盒拒绝执行"
-                try:
-                    stdout, stderr = proc.communicate(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    sm.proc_sandbox.kill(proc.pid)
-                    return f"错误: 超时({timeout}秒)"
-                o = (stdout or "") + ("\n[STDERR]\n"+stderr[:2000] if stderr else "")
-            else:
-                r = subprocess.run(parts,cwd=sandbox_root,capture_output=True,text=True,timeout=timeout,shell=False)
-                o = (r.stdout or "") + ("\n[STDERR]\n"+r.stderr[:2000] if r.stderr else "")
+            if not sm or not sm.proc_sandbox:
+                return "错误: 沙盒未启动或无进程隔离，拒绝执行"
+            proc = sm.proc_sandbox.spawn(parts, cwd=sandbox_root, capture_output=True, shell=False)
+            if not proc:
+                return "错误: 沙盒拒绝执行"
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                sm.proc_sandbox.kill(proc.pid)
+                return f"错误: 超时({timeout}秒)"
+            o = (stdout or "") + ("\n[STDERR]\n"+stderr[:2000] if stderr else "")
             if len(o)>5000: o = o[:5000]+"\n...(截断)"
             return o.strip() or "(无输出)"
         except subprocess.TimeoutExpired: return f"错误: 超时({timeout}秒)"

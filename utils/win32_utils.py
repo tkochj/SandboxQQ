@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from pathlib import Path
 import psutil
 
 logger = logging.getLogger(__name__)
@@ -117,28 +118,30 @@ class TokenManager:
         import ctypes
         from ctypes import wintypes
 
+        # Python 3.12+ missing PSID in wintypes, define as void*
+        PSID = ctypes.c_void_p
+
         userenv = ctypes.WinDLL("userenv")
         CreateAppContainerProfile = userenv.CreateAppContainerProfile
-        CreateAppContainerProfile.restype = wintypes.HRESULT
+        CreateAppContainerProfile.restype = ctypes.c_long
         CreateAppContainerProfile.argtypes = [
             wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
-            ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.PSID),
+            ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(PSID),
         ]
 
         name = _SANDBOX_SID_NAME
-        sid_ptr = wintypes.PSID()
+        sid_ptr = PSID()
         hr = CreateAppContainerProfile(
             name, "SandboxQQ Container", "SandboxQQ AppContainer isolation",
             None, 0, ctypes.byref(sid_ptr),
         )
         if hr != 0:  # S_OK
             # Already exists — derive SID from name
-            from ctypes import wintypes as w
             kernel32 = ctypes.WinDLL("kernel32")
             DeriveAppContainerSidFromAppContainerName = kernel32.DeriveAppContainerSidFromAppContainerName
             DeriveAppContainerSidFromAppContainerName.restype = wintypes.BOOL
             DeriveAppContainerSidFromAppContainerName.argtypes = [
-                wintypes.LPCWSTR, ctypes.POINTER(wintypes.PSID),
+                wintypes.LPCWSTR, ctypes.POINTER(PSID),
             ]
             if not DeriveAppContainerSidFromAppContainerName(name, ctypes.byref(sid_ptr)):
                 logger.warning("DeriveAppContainerSidFromAppContainerName failed")
@@ -151,7 +154,8 @@ class TokenManager:
         try:
             import string as _string_mod
             import subprocess
-            import win32security
+            import ctypes
+            from ctypes import wintypes
 
             sandbox_root = os.path.abspath(sandbox_root)
             Path(sandbox_root).mkdir(parents=True, exist_ok=True)
@@ -160,7 +164,18 @@ class TokenManager:
             if not sid_ptr:
                 logger.warning("Cannot get AppContainer SID for ACL")
                 return None
-            sid_str = win32security.ConvertSidToStringSid(sid_ptr)
+            # Convert SID pointer to string via advapi32 (pywin32 needs PySID, not c_void_p)
+            _advapi32 = ctypes.WinDLL("advapi32")
+            _ConvertSidToStringSidW = _advapi32.ConvertSidToStringSidW
+            _ConvertSidToStringSidW.restype = wintypes.BOOL
+            _ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+            _sid_str_buf = wintypes.LPWSTR()
+            if _ConvertSidToStringSidW(sid_ptr, ctypes.byref(_sid_str_buf)):
+                sid_str = _sid_str_buf.value
+                ctypes.windll.kernel32.LocalFree(_sid_str_buf)
+            else:
+                logger.warning("ConvertSidToStringSidW failed")
+                return None
 
             # Grant full access to sandbox directory
             subprocess.run(
@@ -185,14 +200,15 @@ class TokenManager:
                 for sub in ["Documents", "Desktop", "Downloads", "Pictures", "Videos", "Music", "Favorites", "Contacts"]:
                     deny_dirs.append(os.path.join(user_profile, sub))
                 deny_dirs.append(os.path.join(os.path.dirname(user_profile), "Public"))
-            # Add all fixed drive roots
+            # Add all drive roots (fixed, removable, remote, ramdisk — everything)
             if IS_WINDOWS:
-                import ctypes
                 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                buf = ctypes.create_unicode_buffer(260)
                 for letter in _string_mod.ascii_uppercase:
                     root = f"{letter}:\\"
-                    if kernel32.GetDriveTypeW(root) == 3:  # DRIVE_FIXED
+                    dt = kernel32.GetDriveTypeW(root)
+                    # 2=DRIVE_REMOVABLE, 3=DRIVE_FIXED, 4=DRIVE_REMOTE, 6=DRIVE_RAMDISK
+                    # Skip 1=DRIVE_NO_ROOT_DIR, 5=DRIVE_CDROM
+                    if dt in (2, 3, 4, 6):
                         deny_dirs.append(root)
 
             deny_script = ""
@@ -230,11 +246,21 @@ class TokenManager:
     def get_appcontainer_sid_string() -> str:
         """Return the AppContainer SID as a string (e.g. 'S-1-15-2-...'), or empty."""
         try:
-            import win32security
+            import ctypes
+            from ctypes import wintypes
             sid_ptr = TokenManager._get_appcontainer_sid()
             if not sid_ptr:
                 return ""
-            return win32security.ConvertSidToStringSid(sid_ptr)
+            _advapi32 = ctypes.WinDLL("advapi32")
+            _ConvertSidToStringSidW = _advapi32.ConvertSidToStringSidW
+            _ConvertSidToStringSidW.restype = wintypes.BOOL
+            _ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.LPWSTR)]
+            _sid_str_buf = wintypes.LPWSTR()
+            if _ConvertSidToStringSidW(sid_ptr, ctypes.byref(_sid_str_buf)):
+                result = _sid_str_buf.value
+                ctypes.windll.kernel32.LocalFree(_sid_str_buf)
+                return result
+            return ""
         except Exception as e:
             logger.warning(f"Cannot get AppContainer SID string: {e}")
             return ""

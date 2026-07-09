@@ -85,30 +85,16 @@ class ProcessSandbox:
         self._platform = "windows" if IS_WINDOWS else ("linux" if IS_LINUX else "other")
 
         if IS_WINDOWS and self.sandbox_root:
-            if HAS_PYWIN32:
-                try:
-                    from utils.win32_utils import TokenManager
-                    sid_ptr = TokenManager.get_container_sandbox(str(self.sandbox_root))
-                    self._appcontainer_sid = sid_ptr
-                    if sid_ptr:
-                        self._isolation_ready = True
-                        logger.info(f"AppContainer SID obtained for {self.sandbox_root}")
-                    else:
-                        logger.warning("AppContainer not available")
-                except Exception as e:
-                    logger.warning(f"AppContainer init failed: {e}")
-            if not self._isolation_ready:
-                if self.restricted_token:
-                    self._isolation_ready = True
-                    logger.info("Windows isolation: restricted token available")
-                elif allow_insecure_fallback:
-                    logger.warning("Windows isolation: NO token available, running with OS defaults only")
-                    self._isolation_ready = True
-                else:
-                    raise RuntimeError(
-                        "沙盒隔离初始化失败：既无 AppContainer 也无受限令牌。"
-                        "请安装 pywin32 (pip install pywin32) 或设置 allow_insecure_fallback=True"
-                    )
+            if not HAS_PYWIN32:
+                raise RuntimeError("Windows 沙盒隔离需要 pywin32（pip install pywin32）")
+            from utils.win32_utils import TokenManager
+            sid_ptr = TokenManager.get_container_sandbox(str(self.sandbox_root))
+            self._appcontainer_sid = sid_ptr
+            if sid_ptr:
+                self._isolation_ready = True
+                logger.info(f"AppContainer SID obtained for {self.sandbox_root}")
+            else:
+                raise RuntimeError("AppContainer 初始化失败，无法隔离进程")
 
         elif IS_LINUX and self.sandbox_root:
             if HAS_DOCKER:
