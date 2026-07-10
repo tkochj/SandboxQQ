@@ -32,3 +32,13 @@
 
 - `sandbox_config.json` 含本地路径，在 `.gitignore` 中，不会被提交
 - 修改后需重启沙盒生效
+
+## 清理对话记忆
+
+如果 AI 仍按旧格式回复（如仍使用 `<@!openID>`），可能是对话历史缓存了旧上下文。删除 `conversation_memory.json` 清空所有频道的记忆即可：
+
+```bash
+rm conversation_memory.json
+```
+
+或只删除指定频道的记录（JSON 中按 `bot_id:platform:channel_id` 键查找）。
