@@ -15,3 +15,7 @@ user_config.json
 
 # Embedded clone
 SandboxQQ/
+
+# Runtime plugin data
+plugins/reminders.json
+reminders.json

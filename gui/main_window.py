@@ -2105,6 +2105,7 @@ class MainWindow(QMainWindow):
             memory=self.conv_memory,
             log_func=lambda msg: self._log(msg, "info"),
             sandbox_manager=self.sandbox,
+            bot_manager=self.bot_manager,
         )
         send_file_func = lambda bot_id, cid, path, text, mid, etype: self.bot_manager.send_file(cid, path, text, mid, etype, bot_id=bot_id)
         respond_stage = RespondStage(

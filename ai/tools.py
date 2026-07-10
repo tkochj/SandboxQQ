@@ -59,6 +59,19 @@ _SENSITIVE_FILES = {
     "conversation_memory.json", "user_config.json",
 }
 
+# Track known group_openids from incoming messages
+_known_groups: dict = {}  # group_openid -> {"name": str, "last_seen": float, "bot_id": str}
+
+def record_known_groups(event):
+    """Call from AI stage to record group info from incoming events."""
+    if "GROUP" in getattr(event, "msg_type", ""):
+        gid = getattr(event, "channel_id", "")
+        if gid:
+            _known_groups.setdefault(gid, {})
+            _known_groups[gid]["name"] = getattr(event, "content", "")[:30] or gid
+            _known_groups[gid]["last_seen"] = __import__("time").time()
+            _known_groups[gid]["bot_id"] = getattr(event, "bot_id", "")
+
 class ReadFileTool(SandboxTool):
     name = "read_file"; display_name = "读取文件"
     description = "读取沙盒目录内的文件。路径相对于沙盒根目录。不允许读取配置文件。"
@@ -175,15 +188,16 @@ class RunShellTool(SandboxTool):
 
 class GenerateImageTool(SandboxTool):
     name = "generate_image"; display_name = "生成图片"
-    description = "使用AI生成图片。返回图片URL。需要配置图片生成API。"
+    description = "使用AI生成图片。需要配置图片生成API。output_format=link 时仅返回URL文本链接（适合群聊回复用），output_format=file 时下载到沙盒再发送文件。"
     permission_key = "execute_python"
-    parameters = {"type":"object","properties":{"prompt":{"type":"string","description":"图片描述"},"size":{"type":"string","description":"尺寸 如 1024x1024","default":"1024x1024"}},"required":["prompt"]}
+    parameters = {"type":"object","properties":{"prompt":{"type":"string","description":"图片描述"},"size":{"type":"string","description":"尺寸 如 1024x1024","default":"1024x1024"},"output_format":{"type":"string","enum":["file","link"],"description":"输出格式: file=下载到沙盒后发送文件(默认), link=仅返回文本链接"}},"required":["prompt"]}
     config = None
 
     _last_file = ""
 
     async def run(self, sandbox_root: str, **kwargs) -> str:
         prompt = kwargs.get("prompt",""); size = kwargs.get("size","1024x1024")
+        output_format = kwargs.get("output_format", "file")
         if not self.config or not self.config.image_gen_api_key:
             return "错误: 未配置图片生成API"
         import httpx, aiohttp, uuid
@@ -195,61 +209,77 @@ class GenerateImageTool(SandboxTool):
                     headers={"Authorization":f"Bearer {self.config.image_gen_api_key}","Content-Type":"application/json"})
             data = resp.json()
             img_url = data.get("data",[{}])[0].get("url","")
-            if img_url:
-                ext = os.path.splitext(img_url.split("?")[0])[1] or ".png"
-                local = os.path.join(sandbox_root, f"gen_img_{uuid.uuid4().hex}{ext}")
-                try:
-                    async with aiohttp.ClientSession() as sess:
-                        async with sess.get(img_url, timeout=30, proxy=pu) as r:
-                            if r.status == 200:
-                                with open(local, "wb") as f:
-                                    f.write(await r.read())
-                                if os.path.isfile(local) and os.path.getsize(local) > 0:
-                                    self._last_file = local
-                                    return f"图片已生成并保存到: {local}\n图片链接: {img_url}"
-                except Exception:
-                    pass
-                return f"图片已生成: {img_url}"
-            return f"生成结果: {json.dumps(data,ensure_ascii=False)[:500]}"
+            if not img_url:
+                return f"生成结果: {json.dumps(data,ensure_ascii=False)[:500]}"
+            if output_format == "link":
+                return f"图片已生成，链接: {img_url}\n你可以将此链接以 `![图片]({img_url})` 格式发送给用户。"
+            ext = os.path.splitext(img_url.split("?")[0])[1] or ".png"
+            local = os.path.join(sandbox_root, f"gen_img_{uuid.uuid4().hex}{ext}")
+            try:
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.get(img_url, timeout=30, proxy=pu) as r:
+                        if r.status == 200:
+                            with open(local, "wb") as f:
+                                f.write(await r.read())
+                            if os.path.isfile(local) and os.path.getsize(local) > 0:
+                                self._last_file = local
+                                return f"图片已生成并保存到: {local}\n图片链接: {img_url}"
+            except Exception:
+                pass
+            return f"图片已生成: {img_url}"
         except Exception as e: return f"生成失败: {e}"
 
 class AnalyzeImageTool(SandboxTool):
     name = "analyze_image"; display_name = "分析图片"
-    description = "分析沙盒中的图片文件内容。当用户问图片里有什么、要求描述图片、或需要理解图片内容时，必须调用此工具。先确认图片文件路径（通常在沙盒根目录或 outputs/ 下），然后传入路径分析。"
+    description = "分析图片内容。可以分析沙盒中的本地图片文件（传 image_path），或网络图片URL（传 image_url）。当用户发送图片消息、问图片里有什么、要求描述图片或理解图片内容时，必须调用此工具。"
     permission_key = "read_file"
-    parameters = {"type":"object","properties":{"image_path":{"type":"string","description":"图片路径(相对沙盒根目录)"},"question":{"type":"string","description":"关于图片的问题","default":"请描述这张图片"}},"required":["image_path"]}
+    parameters = {"type":"object","properties":{"image_path":{"type":"string","description":"图片路径(相对沙盒根目录)，与image_url二选一"},"image_url":{"type":"string","description":"网络图片URL，与image_path二选一"},"question":{"type":"string","description":"关于图片的问题","default":"请描述这张图片"}},"required":["question"]}
     config = None
 
     async def run(self, sandbox_root: str, **kwargs) -> str:
-        ip = kwargs.get("image_path",""); question = kwargs.get("question","请描述这张图片")
-        ap = _resolve(sandbox_root, ip)
-        if not ap: return f"错误: 路径超出沙盒: {ip}"
-        if not os.path.isfile(ap): return f"错误: 文件不存在: {ip}"
+        ip = kwargs.get("image_path",""); iurl = kwargs.get("image_url","")
+        question = kwargs.get("question","请描述这张图片")
+        if not ip and not iurl:
+            return "错误: 请提供 image_path 或 image_url"
+        data_url = ""
+        if ip:
+            ap = _resolve(sandbox_root, ip)
+            if not ap: return f"错误: 路径超出沙盒: {ip}"
+            if not os.path.isfile(ap): return f"错误: 文件不存在: {ip}"
+            try:
+                with open(ap,"rb") as f: b64 = base64.b64encode(f.read()).decode()
+                ext = Path(ap).suffix.lower()
+                mime = {"jpg":"image/jpeg","jpeg":"image/jpeg","png":"image/png","gif":"image/gif","webp":"image/webp"}.get(ext.lstrip("."),"image/png")
+                data_url = f"data:{mime};base64,{b64}"
+            except Exception as e:
+                return f"读取图片失败: {e}"
+        else:
+            data_url = iurl
         try:
-            with open(ap,"rb") as f: b64 = base64.b64encode(f.read()).decode()
-            ext = Path(ap).suffix.lower()
-            mime = {"jpg":"image/jpeg","jpeg":"image/jpeg","png":"image/png","gif":"image/gif","webp":"image/webp"}.get(ext.lstrip("."),"image/png")
-            data_url = f"data:{mime};base64,{b64}"
-            if self.config and self.config.vision_api_key:
-                import httpx
-                pu = getattr(self, '_proxy_url', '') or None
-                api_url = (self.config.vision_api_url or self.config.api_url).rstrip("/") + "/chat/completions"
-                api_key = self.config.vision_api_key or self.config.api_key
-                model = self.config.vision_model or self.config.model
-                payload = {"model":model,"messages":[{"role":"user","content":[{"type":"text","text":question},{"type":"image_url","image_url":{"url":data_url}}]}],"max_tokens":1024}
-                async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
-                    resp = await client.post(api_url, json=payload,
-                        headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"})
-                    resp.raise_for_status()
-                    return resp.json()["choices"][0]["message"]["content"]
-            if self.config and hasattr(self.config, 'vision_api_key') and self.config.vision_api_key:
-                return f"图片已读取({os.path.getsize(ap)}bytes)，但识图API返回错误，请检查vision配置"
-            return f"图片已读取({os.path.getsize(ap)}bytes)，未配置识图模型"
+            # Resolve vision API from: dedicated vision config -> active provider -> global config
+            pc = self.config.get_active_provider_config() if self.config and hasattr(self.config, 'get_active_provider_config') else None
+            use_key = self.config.vision_api_key if self.config and self.config.vision_api_key else (pc.api_key if pc else None)
+            use_url = self.config.vision_api_url if self.config and self.config.vision_api_url else (pc.api_url if pc else None)
+            use_model = self.config.vision_model if self.config and self.config.vision_model else (pc.model if pc else None)
+
+            if not use_key:
+                return "错误: 未配置识图 API Key（请设置 vision_api_key，或确保当前 AI 供应商支持 Vision）"
+            import httpx
+            pu = getattr(self, '_proxy_url', '') or None
+            api_url = use_url.rstrip("/") + "/chat/completions"
+            payload = {"model": use_model, "messages": [{"role": "user", "content": [{"type": "text", "text": question}, {"type": "image_url", "image_url": {"url": data_url}}]}], "max_tokens": 1024}
+            async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
+                resp = await client.post(api_url, json=payload,
+                    headers={"Authorization": f"Bearer {use_key}", "Content-Type": "application/json"})
+                resp.raise_for_status()
+                result = resp.json()["choices"][0]["message"]["content"]
+                return result.strip() or "(无描述)"
         except Exception as e:
             err = str(e)
-            if "does not support image" in err or "image input" in err.lower():
-                return "当前模型不支持图片识别，请配置支持 Vision 的 API（如 GLM-4.6V-Flash）"
-            return f"分析失败: {err[:200]}"
+            if any(k in err.lower() for k in ("does not support image", "image input", "not support", "vision")):
+                model_name = use_model or "当前模型"
+                return f"{model_name} 不支持图片识别，请配置支持 Vision 的模型（如 glm-4v-flash、gpt-4o、qwen-vl-plus）"
+            return f"分析失败: {err[:300]}"
 
 class GenerateVideoTool(SandboxTool):
     name = "generate_video"; display_name = "生成视频"
@@ -616,6 +646,87 @@ class SendFileTool(SandboxTool):
         self._last_file = ap
         return f"已准备发送文件: {fname} ({_fmt_size(size)})\n{('描述: '+desc) if desc else ''}"
 
+class GetGroupMembersTool(SandboxTool):
+    name = "get_group_members"; display_name = "获取群成员"
+    description = "获取指定群聊的成员列表。需要群聊的 openid。返回成员ID列表。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{"group_openid":{"type":"string","description":"群聊 openid"}},"required":["group_openid"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        gid = kwargs.get("group_openid","")
+        if not gid:
+            return "错误: 缺少 group_openid"
+        bm = getattr(self, '_bot_manager', None)
+        bot_id = getattr(self, '_current_bot_id', "")
+        if not bm:
+            return "错误: Bot管理器不可用"
+        platform = bm.get_platform(bot_id) if hasattr(bm, 'get_platform') else None
+        if not platform or not hasattr(platform, '_client') or not platform._client:
+            return "错误: 机器人未连接"
+        try:
+            from botpy.http import Route
+            route = Route("GET", "/v2/groups/{group_openid}/members", group_openid=gid)
+            import asyncio
+            loop = platform._loop
+            if not loop or loop.is_closed():
+                return "错误: 机器人事件循环已关闭"
+            future = asyncio.run_coroutine_threadsafe(
+                platform._client.api._http.request(route),
+                loop,
+            )
+            result = future.result(timeout=15)
+            if isinstance(result, dict):
+                members = result.get("members", []) or result.get("data", [])
+                if members:
+                    lines = [f"   {m.get('id','')} {m.get('username','')}" for m in members[:50]]
+                    return f"群成员 ({len(members)} 人):\n" + "\n".join(lines)
+                return f"API返回: {json.dumps(result, ensure_ascii=False)[:500]}"
+            return f"API返回: {str(result)[:500]}"
+        except Exception as e:
+            return f"获取群成员失败: {e}"
+
+class GetKnownGroupsTool(SandboxTool):
+    name = "get_known_groups"; display_name = "已知群聊列表"
+    description = "列出机器人曾互动过的群聊。返回群聊名称和openid。"
+    permission_key = ""
+    parameters = {"type":"object","properties":{}}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        if not _known_groups:
+            return "暂无已知群聊。机器人收到群消息后会自动记录。"
+        lines = []
+        import time
+        now = time.time()
+        for gid, info in sorted(_known_groups.items(), key=lambda x: x[1].get("last_seen", 0), reverse=True):
+            name = info.get("name", gid)[:20]
+            last_seen = now - info.get("last_seen", 0)
+            ls_str = f"{int(last_seen)}秒前" if last_seen < 3600 else f"{int(last_seen/60)}分钟前" if last_seen < 86400 else f"{int(last_seen/86400)}天前"
+            lines.append(f"  [{gid[:12]}...] {name} ({ls_str})")
+        return f"已知群聊 ({len(lines)} 个):\n" + "\n".join(lines)
+
+class SendGroupMessageTool(SandboxTool):
+    name = "send_group_message"; display_name = "发送群消息"
+    description = "向指定的群聊发送消息。需要群聊的 openid。注意：只能在私聊中使用此工具，用于将消息转发到群聊。"
+    permission_key = ""  # always allowed - controlled by msg_type check in AI stage
+    parameters = {"type":"object","properties":{"group_openid":{"type":"string","description":"目标群聊的 openid"},"content":{"type":"string","description":"消息内容"}},"required":["group_openid","content"]}
+
+    async def run(self, sandbox_root: str, **kwargs) -> str:
+        group_openid = kwargs.get("group_openid","")
+        content = kwargs.get("content","")
+        if not group_openid or not content:
+            return "错误: 缺少 group_openid 或 content"
+        bm = getattr(self, '_bot_manager', None)
+        bot_id = getattr(self, '_current_bot_id', "")
+        if not bm:
+            return "错误: Bot管理器不可用"
+        try:
+            success = await bm.send_message(channel_id=group_openid, content=content, bot_id=bot_id)
+            if success:
+                return f"消息已成功发送到群聊 {group_openid}"
+            return f"错误: 发送到群聊 {group_openid} 失败"
+        except Exception as e:
+            return f"发送错误: {e}"
+
 class CleanSandboxTool(SandboxTool):
     name = "clean_sandbox"; display_name = "清理沙盒"
     description = "清理沙盒目录中的临时文件和生成的文件。保留目录结构，只删除 outputs/、downloads/、temp/ 等目录下的文件，以及沙盒根目录的 .py/.png/.jpg/.txt/.zip 文件。"
@@ -667,7 +778,8 @@ TOOL_REGISTRY: List[SandboxTool] = [
     WebSearchTool(),
     PdfExtractTool(), OcrTool(), TranslateTool(), HashTool(),
     DateTimeTool(), DataConvertTool(), QRCodeTool(), ChartTool(),
-    SendFileTool(), CleanSandboxTool(),
+    SendFileTool(), CleanSandboxTool(), SendGroupMessageTool(),
+    GetGroupMembersTool(), GetKnownGroupsTool(),
 ]
 
 def get_tool_definitions(perms: Optional[ToolPermissions] = None) -> List[dict]:
@@ -682,10 +794,11 @@ def get_tool_by_name(name: str) -> Optional[SandboxTool]:
         if t.name == name: return t
     return None
 
-def set_tool_config(config, sandbox_manager=None):
+def set_tool_config(config, sandbox_manager=None, bot_manager=None):
     for t in TOOL_REGISTRY:
         t.config = config
         t._sandbox_manager = sandbox_manager
+        t._bot_manager = bot_manager
         # Expose proxy URL for tools that make HTTP requests from the main process
         t._proxy_url = (
             sandbox_manager.proxy_sandbox.proxy_url

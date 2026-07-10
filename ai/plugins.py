@@ -11,7 +11,14 @@ logger = logging.getLogger(__name__)
 PLUGIN_DIR = Path(__file__).resolve().parent.parent / "plugins"
 
 # Only plugins listed here can be loaded. Others are silently ignored.
-_TRUSTED_PLUGINS = {"meme_manager"}
+_TRUSTED_PLUGINS = {"meme_manager", "timed_reminder"}
+
+# Module-level bot_manager reference for proactive plugin actions
+_bot_manager = None
+
+def set_bot_manager(bm):
+    global _bot_manager
+    _bot_manager = bm
 
 
 class PluginBase:

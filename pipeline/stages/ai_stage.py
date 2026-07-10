@@ -31,6 +31,7 @@ class AIResponseStage(Stage):
         memory: Optional[ConversationMemory] = None,
         log_func: Optional[Callable] = None,
         sandbox_manager=None,
+        bot_manager=None,
     ):
         self._provider_manager = provider_manager
         self._get_config = get_config
@@ -38,6 +39,10 @@ class AIResponseStage(Stage):
         self._memory = memory or ConversationMemory()
         self._log = log_func
         self._sandbox_manager = sandbox_manager
+        self._bot_manager = bot_manager
+        if bot_manager:
+            from ai.plugins import set_bot_manager
+            set_bot_manager(bot_manager)
         self._known_users: dict = {}  # channel_key -> {user_id: display_name}
 
     async def _analyze_image(self, img_path: str, config) -> str:
@@ -161,6 +166,10 @@ class AIResponseStage(Stage):
         if event.sender_id and sender_tag:
             self._known_users.setdefault(channel_key, {})
             self._known_users[channel_key][event.sender_id] = sender_tag
+
+        # Record known groups for group info tools
+        from ai.tools import record_known_groups
+        record_known_groups(event)
         self._memory.add_message(channel_key, "user", user_content)
         if self._log:
             self._log(f"[AI] 用户: {user_content[:80]}")
@@ -175,6 +184,11 @@ class AIResponseStage(Stage):
         bot_label = event.bot_id or ""
         if bot_label:
             system = f"[当前机器人: {bot_label}]\n" + system
+        # Chat type and time awareness
+        import datetime
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
+        chat_type = "群聊" if "GROUP" in event.msg_type else ("私聊" if "C2C" in event.msg_type else event.msg_type)
+        system += f"\n[当前时间: {now}] [聊天类型: {chat_type}]"
         # Expose known users for @ mention ability in group chats
         users = self._known_users.get(channel_key, {})
         if users and "GROUP" in event.msg_type:
@@ -228,6 +242,7 @@ class AIResponseStage(Stage):
             tools = None
             if enable_tools:
                 tools = get_tool_definitions(config.tool_permissions)
+                sub_mgr = None
                 if config.sub_agents:
                     sub_mgr = SubAgentManager(config)
                     sub_mgr.build(config.sub_agents)
@@ -241,8 +256,18 @@ class AIResponseStage(Stage):
                                     "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "要委派的任务"}}, "required": ["task"]},
                                 },
                             })
-                else:
-                    sub_mgr = None
+                # Add context-specific tools
+                if "C2C" in event.msg_type:
+                    bm = getattr(self, '_bot_manager', None)
+                    if bm:
+                        sm_tool = get_tool_by_name("send_group_message")
+                        if sm_tool:
+                            tools.append(sm_tool.to_openai_tool())
+                if "GROUP" in event.msg_type:
+                    for tname in ("get_known_groups", "get_group_members"):
+                        t = get_tool_by_name(tname)
+                        if t:
+                            tools.append(t.to_openai_tool())
             else:
                 sub_mgr = None
 
@@ -269,7 +294,7 @@ class AIResponseStage(Stage):
                 messages.append({"role": "system", "content": f"用户附带了一张图片，自动识图结果:\n{vision_analysis[:500]}"})
             messages.append({"role": "user", "content": user_content})
 
-            set_tool_config(config, self._sandbox_manager)
+            set_tool_config(config, self._sandbox_manager, self._bot_manager)
 
             for rnd in range(max_rounds):
                 # Thinking mode
@@ -322,8 +347,7 @@ class AIResponseStage(Stage):
                     else:
                         tool = get_tool_by_name(tc.name)
                         if not tool:
-                            # Check plugin tools
-                            plugin_result = await self._run_plugin_tool(tc.name, tc.arguments)
+                            plugin_result = await self._run_plugin_tool(tc.name, tc.arguments, event)
                             if plugin_result is not None:
                                 result = plugin_result
                             else:
@@ -332,6 +356,7 @@ class AIResponseStage(Stage):
                             if self._log:
                                 self._log(f"[AI] 调用工具: {tc.name}")
                             try:
+                                tool._current_bot_id = getattr(event, 'bot_id', '')
                                 result = await tool.run(sandbox_root, **tc.arguments)
                                 if hasattr(tool, '_last_file') and tool._last_file and not event.reply_file:
                                     if os.path.isfile(tool._last_file):
@@ -352,13 +377,16 @@ class AIResponseStage(Stage):
             logger.error(f"AI stage error: {err[:200]}")
         yield
 
-    async def _run_plugin_tool(self, tool_name: str, args: dict) -> Optional[str]:
+    async def _run_plugin_tool(self, tool_name: str, args: dict, event=None) -> Optional[str]:
         from ai.plugins import PluginManager
         pm = PluginManager()
         pm.load_all()
         for plug in pm.get_all():
             if hasattr(plug, tool_name):
                 try:
+                    if event:
+                        plug._current_bot_id = getattr(event, 'bot_id', '')
+                        plug._current_channel_id = getattr(event, 'channel_id', '')
                     fn = getattr(plug, tool_name)
                     import inspect
                     if inspect.iscoroutinefunction(fn):
