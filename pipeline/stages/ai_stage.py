@@ -238,10 +238,15 @@ class AIResponseStage(Stage):
             yield
             return
 
+        self._plugin_tool_map: dict = {}
         try:
             tools = None
             if enable_tools:
                 tools = get_tool_definitions(config.tool_permissions)
+                # Remove context-restricted tools (added conditionally below)
+                _CONTEXT_TOOLS = {"send_group_message", "get_known_groups", "get_group_members"}
+                tools = [t for t in tools if t["function"]["name"] not in _CONTEXT_TOOLS]
+
                 sub_mgr = None
                 if config.sub_agents:
                     sub_mgr = SubAgentManager(config)
@@ -256,7 +261,7 @@ class AIResponseStage(Stage):
                                     "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "要委派的任务"}}, "required": ["task"]},
                                 },
                             })
-                # Add context-specific tools
+                # Add context-specific tools only in their respective chat types
                 if "C2C" in event.msg_type:
                     bm = getattr(self, '_bot_manager', None)
                     if bm:
@@ -268,25 +273,28 @@ class AIResponseStage(Stage):
                         t = get_tool_by_name(tname)
                         if t:
                             tools.append(t.to_openai_tool())
+
+                # Add plugin tools (only when tools are enabled)
+                plugin_mgr = PluginManager()
+                plugin_mgr.load_all()
+                for plug in plugin_mgr.get_all():
+                    td = getattr(plug, "get_tool_definitions", None)
+                    if td:
+                        try:
+                            import inspect
+                            if inspect.iscoroutinefunction(td):
+                                ptools = await td()
+                            else:
+                                ptools = td()
+                            if ptools:
+                                for pt in ptools:
+                                    pname = pt["function"]["name"]
+                                    tools.append(pt)
+                                    self._plugin_tool_map[pname] = plug
+                        except Exception as e:
+                            logger.warning(f"插件工具加载失败: {e}")
             else:
                 sub_mgr = None
-
-            # Add plugin tools
-            plugin_mgr = PluginManager()
-            plugin_mgr.load_all()
-            for plug in plugin_mgr.get_all():
-                td = getattr(plug, "get_tool_definitions", None)
-                if td:
-                    try:
-                        import inspect
-                        if inspect.iscoroutinefunction(td):
-                            ptools = await td()
-                        else:
-                            ptools = td()
-                        if ptools:
-                            tools.extend(ptools)
-                    except Exception as e:
-                        logger.warning(f"插件工具加载失败: {e}")
 
             messages = [{"role": "system", "content": system}]
             messages.extend(self._memory.get_history(channel_key, system))
@@ -347,7 +355,7 @@ class AIResponseStage(Stage):
                     else:
                         tool = get_tool_by_name(tc.name)
                         if not tool:
-                            plugin_result = await self._run_plugin_tool(tc.name, tc.arguments, event)
+                            plugin_result = await self._run_plugin_tool(tc.name, tc.arguments, event, sandbox_root)
                             if plugin_result is not None:
                                 result = plugin_result
                             else:
@@ -357,6 +365,7 @@ class AIResponseStage(Stage):
                                 self._log(f"[AI] 调用工具: {tc.name}")
                             try:
                                 tool._current_bot_id = getattr(event, 'bot_id', '')
+                                tool._current_channel_id = getattr(event, 'channel_id', '')
                                 result = await tool.run(sandbox_root, **tc.arguments)
                                 if hasattr(tool, '_last_file') and tool._last_file and not event.reply_file:
                                     if os.path.isfile(tool._last_file):
@@ -377,7 +386,23 @@ class AIResponseStage(Stage):
             logger.error(f"AI stage error: {err[:200]}")
         yield
 
-    async def _run_plugin_tool(self, tool_name: str, args: dict, event=None) -> Optional[str]:
+    async def _run_plugin_tool(self, tool_name: str, args: dict, event=None, sandbox_root="") -> Optional[str]:
+        # Fast path: use the tool-to-plugin map built during tool definition loading
+        plug = getattr(self, '_plugin_tool_map', {}).get(tool_name)
+        if plug:
+            try:
+                if event:
+                    plug._current_bot_id = getattr(event, 'bot_id', '')
+                    plug._current_channel_id = getattr(event, 'channel_id', '')
+                fn = getattr(plug, tool_name, None)
+                if fn:
+                    import inspect
+                    kw = {**args, "sandbox_root": sandbox_root} if sandbox_root else args
+                    result = await fn(**kw) if inspect.iscoroutinefunction(fn) else fn(**kw)
+                    return str(result) if result else None
+            except Exception as e:
+                return f"插件工具执行错误: {e}"
+        # Fallback: linear scan for backward compatibility
         from ai.plugins import PluginManager
         pm = PluginManager()
         pm.load_all()
@@ -389,10 +414,8 @@ class AIResponseStage(Stage):
                         plug._current_channel_id = getattr(event, 'channel_id', '')
                     fn = getattr(plug, tool_name)
                     import inspect
-                    if inspect.iscoroutinefunction(fn):
-                        result = await fn(**args)
-                    else:
-                        result = fn(**args)
+                    kw = {**args, "sandbox_root": sandbox_root} if sandbox_root else args
+                    result = await fn(**kw) if inspect.iscoroutinefunction(fn) else fn(**kw)
                     return str(result) if result else None
                 except Exception as e:
                     return f"插件工具执行错误: {e}"
