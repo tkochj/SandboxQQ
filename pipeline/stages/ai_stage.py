@@ -74,8 +74,11 @@ class AIResponseStage(Stage):
                 ],
                 "max_tokens": 1024,
             }
+            pu = ""
+            if self._sandbox_manager and getattr(self._sandbox_manager, 'proxy_sandbox', None):
+                pu = self._sandbox_manager.proxy_sandbox.proxy_url or ""
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=60) as resp:
+                async with session.post(url, json=payload, headers=headers, timeout=60, proxy=pu or None) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -95,8 +98,11 @@ class AIResponseStage(Stage):
             ext = ".png"
         local = os.path.join(sandbox_root, f"qq_img_{uuid.uuid4().hex}{ext}")
         try:
+            pu = ""
+            if self._sandbox_manager and getattr(self._sandbox_manager, 'proxy_sandbox', None):
+                pu = self._sandbox_manager.proxy_sandbox.proxy_url or ""
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=30) as resp:
+                async with session.get(url, timeout=30, proxy=pu or None) as resp:
                     if resp.status == 200:
                         with open(local, "wb") as f:
                             f.write(await resp.read())
