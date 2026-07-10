@@ -204,7 +204,7 @@ class GenerateImageTool(SandboxTool):
         pu = getattr(self, '_proxy_url', '') or None
         try:
             url = f"{self.config.image_gen_api_url.rstrip('/')}/images/generations"
-            async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
+            async with httpx.AsyncClient(timeout=60, proxy=pu) as client:
                 resp = await client.post(url, json={"model":self.config.image_gen_model or "dall-e-3","prompt":prompt,"n":1,"size":size},
                     headers={"Authorization":f"Bearer {self.config.image_gen_api_key}","Content-Type":"application/json"})
             data = resp.json()
@@ -268,7 +268,7 @@ class AnalyzeImageTool(SandboxTool):
             pu = getattr(self, '_proxy_url', '') or None
             api_url = use_url.rstrip("/") + "/chat/completions"
             payload = {"model": use_model, "messages": [{"role": "user", "content": [{"type": "text", "text": question}, {"type": "image_url", "image_url": {"url": data_url}}]}], "max_tokens": 1024}
-            async with httpx.AsyncClient(timeout=60, proxies=pu) as client:
+            async with httpx.AsyncClient(timeout=60, proxy=pu) as client:
                 resp = await client.post(api_url, json=payload,
                     headers={"Authorization": f"Bearer {use_key}", "Content-Type": "application/json"})
                 resp.raise_for_status()
@@ -296,7 +296,7 @@ class GenerateVideoTool(SandboxTool):
         pu = getattr(self, '_proxy_url', '') or None
         try:
             url = f"{self.config.video_gen_api_url.rstrip('/')}/video/generations"
-            async with httpx.AsyncClient(timeout=120, proxies=pu) as client:
+            async with httpx.AsyncClient(timeout=120, proxy=pu) as client:
                 resp = await client.post(url, json={"model":self.config.video_gen_model or "default","prompt":prompt,"duration":duration},
                     headers={"Authorization":f"Bearer {self.config.video_gen_api_key}","Content-Type":"application/json"})
             data = resp.json()
@@ -411,7 +411,7 @@ class WebSearchTool(SandboxTool):
         import httpx
         pu = getattr(self, '_proxy_url', '') or None
         try:
-            async with httpx.AsyncClient(timeout=15, proxies=pu) as c:
+            async with httpx.AsyncClient(timeout=15, proxy=pu) as c:
                 r = await c.get(f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1")
                 data = r.json()
                 results = []
@@ -474,7 +474,7 @@ class TranslateTool(SandboxTool):
         try:
             import httpx
             pu = getattr(self, '_proxy_url', '') or None
-            async with httpx.AsyncClient(timeout=15, proxies=pu) as c:
+            async with httpx.AsyncClient(timeout=15, proxy=pu) as c:
                 resp = await c.post("https://api.mymemory.translated.net/get", data={"q": text, "langpair": f"auto|{target}"})
                 data = resp.json()
                 return data.get("responseData", {}).get("translatedText", "") or "(翻译失败)"
