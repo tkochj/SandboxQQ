@@ -92,6 +92,15 @@ class ConversationMemory:
             self._dirty = True
         self._save()
 
+    def clear_by_bot_id(self, bot_id: str):
+        with self._lock:
+            keys = [k for k in self._histories if k.startswith(f"{bot_id}:")]
+            for k in keys:
+                self._histories.pop(k, None)
+            self._dirty = bool(keys)
+        if keys:
+            self._save()
+
     def _trim(self, channel_id: str):
         history = self._histories.get(channel_id)
         if history and len(history) > self._max_history:

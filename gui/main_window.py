@@ -590,9 +590,6 @@ class MainWindow(QMainWindow):
         self.ai_ctx_window.setValue(32000)
         self.ai_ctx_window.setSingleStep(1024)
         ctx_form.addRow("窗口大小:", self.ai_ctx_window)
-        self.btn_clear_memory = IconButton("清除所有对话记忆", "🗑", "danger")
-        self.btn_clear_memory.clicked.connect(self._clear_conversation_memory)
-        ctx_form.addRow(self.btn_clear_memory)
         layout.addWidget(ctx_box)
 
         think_box = QGroupBox("深度思考")
@@ -1265,6 +1262,10 @@ class MainWindow(QMainWindow):
         self.bot_ai_enable_tools.setToolTip("半选=继承全局设置，勾选=强制启用工具，不勾选=强制禁用工具")
         self.bot_ai_enable_tools.setStyleSheet(f"color: {C_TEXT};")
         ai_form.addRow("", self.bot_ai_enable_tools)
+
+        self.bot_btn_clear_memory = IconButton("清除该机器人对话记忆", "🗑", "danger")
+        self.bot_btn_clear_memory.clicked.connect(self._clear_bot_memory)
+        ai_form.addRow("", self.bot_btn_clear_memory)
 
         layout.addWidget(ai_box)
 
@@ -2859,18 +2860,24 @@ class Plugin:
                 w.deleteLater()
         self._log("对话已清空")
 
-    def _clear_conversation_memory(self):
-        import os
+    def _clear_bot_memory(self):
+        row = self.bot_table.currentRow()
+        if row < 0 or row >= len(self.bot_instances):
+            QMessageBox.warning(self, "提示", "请先在机器人表格中选中一个机器人")
+            return
+        inst = self.bot_instances[row]
+        bot_id = inst.get("bot_id", "") or inst.get("app_id", "")
+        if not bot_id:
+            QMessageBox.warning(self, "提示", "该机器人没有有效的 ID")
+            return
         from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(self, "确认清除", "确定清除所有频道的对话记忆？此操作不可撤销。",
+        reply = QMessageBox.question(self, "确认清除", f"确定清除机器人「{inst.get('name', bot_id)}」的所有对话记忆？",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
         if hasattr(self, 'conv_memory') and self.conv_memory:
-            self.conv_memory._store.clear()
-            self.conv_memory._dirty = True
-            self.conv_memory._save()
-            self._log("所有对话记忆已清除", "success")
+            self.conv_memory.clear_by_bot_id(bot_id)
+            self._log(f"机器人 {inst.get('name', bot_id)} 的对话记忆已清除", "success")
 
     def _update_sub_agent_list(self):
         self.chat_sub_agent.clear()
