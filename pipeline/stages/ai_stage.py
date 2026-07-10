@@ -193,8 +193,8 @@ class AIResponseStage(Stage):
         users = self._known_users.get(channel_key, {})
         if users and "GROUP" in event.msg_type:
             roster = "\n".join(f"  [{name}]({uid})" for uid, name in users.items())
-            system += f"\n\n## 群成员\n以下是在本群中出现过的成员，你可以用 `<@!对方openID>` 格式 @ 他们：\n{roster}\n"
-            system += "\n在回复群消息时，如需 @ 某人，请直接在回复内容中包含 `<@!对方openID>`。"
+            system += f"\n\n## 群成员\n以下是在本群中出现过的成员，你可以用 `<@对方openID>` 格式 @ 他们：\n{roster}\n"
+            system += "\n在回复群消息时，如需 @ 某人，请直接在回复内容中包含 `<@对方openID>`。"
         skills_mgr = SkillsManager()
         skills_mgr.load_from_config(config.skills)
         enabled_skills = skills_mgr.get_enabled()

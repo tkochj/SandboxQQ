@@ -133,7 +133,7 @@ class _BotpyClient(botpy.Client):
             return
         # Check various @ mention formats used by QQ API
         content = message.content or ""
-        if app_id in content or f"<@!{app_id}>" in content:
+        if app_id in content or f"<@{app_id}>" in content or f"<@!{app_id}>" in content:
             self._platform._handle_botpy_msg(message, "GROUP_AT_MESSAGE_CREATE")
 
     async def on_c2c_message_create(self, message: C2CMessage):
