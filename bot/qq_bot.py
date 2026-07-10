@@ -163,7 +163,7 @@ class QQOfficialPlatform(Platform):
         user_openid = ""
         if author:
             sender_id = str(getattr(author, "member_openid", None) or getattr(author, "user_openid", None) or getattr(author, "id", ""))
-            sender_name = getattr(author, "username", "")
+            sender_name = getattr(author, "username", "") or getattr(getattr(msg, "member", None), "nick", "") or ""
             user_openid = str(getattr(author, "user_openid", "") or getattr(author, "id", ""))
 
         channel_id = getattr(msg, "channel_id", "") or getattr(msg, "group_openid", "") or user_openid

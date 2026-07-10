@@ -41,7 +41,7 @@ class RespondStage(Stage):
                 except Exception as e:
                     logger.error("Send file error: %s", e)
 
-        if event.reply_text and not (sent_file and not event.reply_text.strip()):
+        if event.reply_text and not sent_file:
             try:
                 if self._log:
                     self._log("[Bot回复] 发给 %s: %s" % (event.sender_id, event.reply_text[:200]))
